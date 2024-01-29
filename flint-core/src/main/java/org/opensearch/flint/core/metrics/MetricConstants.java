@@ -21,4 +21,10 @@ public class MetricConstants {
      * Similar to OS_READ_METRIC_PREFIX, this constant is used for categorizing and identifying metrics that pertain to write operations.
      */
     public static final String OS_WRITE_OP_METRIC_PREFIX = "opensearch.write";
+    public static final String REPL_RUNNING_METRIC = "session.running.count";
+    public static final String REPL_FAILED_METRIC = "session.failed.count";
+    public static final String REPL_SUCCESS_METRIC = "session.success.count";
+    public static final String STATEMENT_RUNNING_METRIC = "statement.running.count";
+    public static final String STATEMENT_FAILED_METRIC = "statement.failed.count";
+    public static final String STATEMENT_SUCCESS_METRIC = "statement.success.count";
 }

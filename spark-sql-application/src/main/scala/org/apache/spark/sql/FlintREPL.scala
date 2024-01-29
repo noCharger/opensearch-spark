@@ -18,6 +18,8 @@ import org.opensearch.action.get.GetResponse
 import org.opensearch.common.Strings
 import org.opensearch.flint.app.{FlintCommand, FlintInstance}
 import org.opensearch.flint.app.FlintInstance.formats
+import org.opensearch.flint.core.metrics.{MetricConstants, MetricsUtil}
+import org.opensearch.flint.core.metrics.MetricsUtil.{decrementCounter, incrementCounter}
 import org.opensearch.flint.core.storage.{FlintReader, OpenSearchUpdater}
 
 import org.apache.spark.SparkConf
@@ -155,6 +157,7 @@ object FlintREPL extends Logging with FlintJobExecutor {
         exponentialBackoffRetry(maxRetries = 5, initialDelay = 2.seconds) {
           queryLoop(commandContext)
         }
+        recordSessionSuccess()
       } catch {
         case e: Exception =>
           handleSessionError(
@@ -364,6 +367,7 @@ object FlintREPL extends Logging with FlintJobExecutor {
       FlintInstance.serializeWithoutJobId(flintJob, currentTime)
     }
     flintSessionIndexUpdater.upsert(sessionId, serializedFlintInstance)
+    incrementCounter(MetricConstants.REPL_RUNNING_METRIC)
     logInfo(
       s"""Updated job: {"jobid": ${flintJob.jobId}, "sessionId": ${flintJob.sessionId}} from $sessionIndex""")
   }
@@ -384,6 +388,9 @@ object FlintREPL extends Logging with FlintJobExecutor {
       .getOrElse(createFailedFlintInstance(applicationId, jobId, sessionId, jobStartTime, error))
 
     updateFlintInstance(flintInstance, flintSessionIndexUpdater, sessionId)
+    if (flintInstance.state.equals("fail")) {
+      recordSessionFailed()
+    }
   }
 
   private def getExistingFlintInstance(
@@ -567,6 +574,7 @@ object FlintREPL extends Logging with FlintJobExecutor {
         flintCommand.complete()
       }
       updateSessionIndex(flintCommand, flintSessionIndexUpdater)
+      recordCommandStateChange(flintCommand)
     } catch {
       // e.g., maybe due to authentication service connection issue
       // or invalid catalog (e.g., we are operating on data not defined in provided data source)
@@ -575,6 +583,7 @@ object FlintREPL extends Logging with FlintJobExecutor {
         logError(error, e)
         flintCommand.fail()
         updateSessionIndex(flintCommand, flintSessionIndexUpdater)
+        recordCommandStateChange(flintCommand)
     }
   }
 
@@ -770,6 +779,7 @@ object FlintREPL extends Logging with FlintJobExecutor {
     flintCommand.running()
     logDebug(s"command running: $flintCommand")
     updateSessionIndex(flintCommand, flintSessionIndexUpdater)
+    incrementCounter(MetricConstants.STATEMENT_SUCCESS_METRIC)
     flintCommand
   }
 
@@ -862,6 +872,7 @@ object FlintREPL extends Logging with FlintJobExecutor {
         currentTimeProvider.currentEpochMillis()),
       getResponse.getSeqNo,
       getResponse.getPrimaryTerm)
+    recordSessionSuccess()
   }
 
   /**
@@ -1022,5 +1033,24 @@ object FlintREPL extends Logging with FlintJobExecutor {
     }
 
     result.getOrElse(throw new RuntimeException("Failed after retries"))
+  }
+
+  private def recordSessionSuccess(): Unit = {
+    decrementCounter(MetricConstants.REPL_RUNNING_METRIC)
+    incrementCounter(MetricConstants.REPL_SUCCESS_METRIC)
+  }
+
+  private def recordSessionFailed(): Unit = {
+    decrementCounter(MetricConstants.REPL_RUNNING_METRIC)
+    incrementCounter(MetricConstants.REPL_FAILED_METRIC)
+  }
+
+  private def recordCommandStateChange(flintCommand: FlintCommand): Unit = {
+    decrementCounter(MetricConstants.STATEMENT_RUNNING_METRIC)
+    if (flintCommand.isComplete()) {
+      incrementCounter(MetricConstants.STATEMENT_SUCCESS_METRIC)
+    } else if (flintCommand.isFailed()) {
+      incrementCounter(MetricConstants.STATEMENT_FAILED_METRIC)
+    }
   }
 }

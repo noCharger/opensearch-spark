@@ -31,6 +31,18 @@ public final class MetricsUtil {
         }
     }
 
+    public static void decrementCounter(String metricName) {
+        Counter counter = getOrCreateCounter(metricName);
+        if (counter != null) {
+            if (counter.getCount() > 0) {
+                counter.dec();
+                LOG.info(metricName + ": decreased");
+            } else {
+                LOG.info(metricName + ": already at minimum, cannot decrease");
+            }
+        }
+    }
+
     // Retrieves or creates a new counter for the given metric name
     private static Counter getOrCreateCounter(String metricName) {
         SparkEnv sparkEnv = SparkEnv.get();
