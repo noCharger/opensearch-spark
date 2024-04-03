@@ -59,8 +59,8 @@ public class AWSRequestSigningApacheInterceptor implements HttpRequestIntercepto
    * @param awsCredentialsProvider source of AWS credentials for signing
    */
   public AWSRequestSigningApacheInterceptor(final String service,
-      final Signer signer,
-      final AWSCredentialsProvider awsCredentialsProvider) {
+                                            final Signer signer,
+                                            final AWSCredentialsProvider awsCredentialsProvider) {
     this.service = service;
     this.signer = signer;
     this.awsCredentialsProvider = awsCredentialsProvider;
@@ -71,7 +71,7 @@ public class AWSRequestSigningApacheInterceptor implements HttpRequestIntercepto
    */
   @Override
   public void process(final HttpRequest request, final HttpContext context)
-      throws HttpException, IOException {
+          throws HttpException, IOException {
     URIBuilder uriBuilder;
     try {
       uriBuilder = new URIBuilder(request.getRequestLine().getUri());
@@ -87,7 +87,7 @@ public class AWSRequestSigningApacheInterceptor implements HttpRequestIntercepto
       signableRequest.setEndpoint(URI.create(host.toURI()));
     }
     final HttpMethodName httpMethod =
-        HttpMethodName.fromValue(request.getRequestLine().getMethod());
+            HttpMethodName.fromValue(request.getRequestLine().getMethod());
     signableRequest.setHttpMethod(httpMethod);
     try {
       signableRequest.setResourcePath(uriBuilder.build().getRawPath());
@@ -97,7 +97,7 @@ public class AWSRequestSigningApacheInterceptor implements HttpRequestIntercepto
 
     if (request instanceof HttpEntityEnclosingRequest) {
       HttpEntityEnclosingRequest httpEntityEnclosingRequest =
-          (HttpEntityEnclosingRequest) request;
+              (HttpEntityEnclosingRequest) request;
       if (httpEntityEnclosingRequest.getEntity() != null) {
         signableRequest.setContent(httpEntityEnclosingRequest.getEntity().getContent());
       }
@@ -112,7 +112,7 @@ public class AWSRequestSigningApacheInterceptor implements HttpRequestIntercepto
     request.setHeaders(mapToHeaderArray(signableRequest.getHeaders()));
     if (request instanceof HttpEntityEnclosingRequest) {
       HttpEntityEnclosingRequest httpEntityEnclosingRequest =
-          (HttpEntityEnclosingRequest) request;
+              (HttpEntityEnclosingRequest) request;
       if (httpEntityEnclosingRequest.getEntity() != null) {
         BasicHttpEntity basicHttpEntity = new BasicHttpEntity();
         basicHttpEntity.setContent(signableRequest.getContent());
@@ -126,11 +126,11 @@ public class AWSRequestSigningApacheInterceptor implements HttpRequestIntercepto
    * @param params list of HTTP query params as NameValuePairs
    * @return a multimap of HTTP query params
    */
-  private static Map<String, List<String>> nvpToMapParams(final List<NameValuePair> params) {
+  static Map<String, List<String>> nvpToMapParams(final List<NameValuePair> params) {
     Map<String, List<String>> parameterMap = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
     for (NameValuePair nvp : params) {
       List<String> argsList =
-          parameterMap.computeIfAbsent(nvp.getName(), k -> new ArrayList<>());
+              parameterMap.computeIfAbsent(nvp.getName(), k -> new ArrayList<>());
       argsList.add(nvp.getValue());
     }
     return parameterMap;
@@ -154,10 +154,10 @@ public class AWSRequestSigningApacheInterceptor implements HttpRequestIntercepto
    * @param header header line to check
    * @return true if the given header should be excluded when signing
    */
-  private static boolean skipHeader(final Header header) {
+  static boolean skipHeader(final Header header) {
     return ("content-length".equalsIgnoreCase(header.getName())
-        && "0".equals(header.getValue())) // Strip Content-Length: 0
-        || "host".equalsIgnoreCase(header.getName()); // Host comes from endpoint
+            && "0".equals(header.getValue())) // Strip Content-Length: 0
+            || "host".equalsIgnoreCase(header.getName()); // Host comes from endpoint
   }
 
   /**

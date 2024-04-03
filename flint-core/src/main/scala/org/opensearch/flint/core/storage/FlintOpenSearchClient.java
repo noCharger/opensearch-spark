@@ -257,10 +257,6 @@ public class FlintOpenSearchClient implements FlintClient {
 
     // SigV4 support
     if (options.getAuth().equals(FlintOptions.SIGV4_AUTH)) {
-      AWS4Signer signer = new AWS4Signer();
-      signer.setServiceName("es");
-      signer.setRegionName(options.getRegion());
-
       // Use DefaultAWSCredentialsProviderChain by default.
       final AtomicReference<AWSCredentialsProvider> customAWSCredentialsProvider =
               new AtomicReference<>(new DefaultAWSCredentialsProviderChain());
@@ -283,7 +279,7 @@ public class FlintOpenSearchClient implements FlintClient {
       restClientBuilder.setHttpClientConfigCallback(builder -> {
                 HttpAsyncClientBuilder delegate = builder.addInterceptorLast(
                         new ResourceBasedAWSRequestSigningApacheInterceptor(
-                                signer.getServiceName(), signer, customAWSCredentialsProvider.get(), metadataAccessAWSCredentialsProvider.get(), options.getSystemIndexName()));
+                                "es", options.getRegion(), customAWSCredentialsProvider.get(), metadataAccessAWSCredentialsProvider.get(), options.getSystemIndexName()));
                 return RetryableHttpAsyncClient.builder(delegate, options);
               }
       );

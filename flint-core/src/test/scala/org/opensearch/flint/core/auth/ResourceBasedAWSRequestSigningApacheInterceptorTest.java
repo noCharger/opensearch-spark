@@ -3,6 +3,7 @@ package org.opensearch.flint.core.auth;
 import com.amazonaws.auth.AWSCredentialsProvider;
 import com.amazonaws.auth.Signer;
 import org.apache.http.HttpRequest;
+import org.apache.http.HttpRequestInterceptor;
 import org.apache.http.message.BasicHttpRequest;
 import org.apache.http.protocol.HttpContext;
 import org.junit.Before;
@@ -17,7 +18,11 @@ import static org.mockito.Mockito.*;
 public class ResourceBasedAWSRequestSigningApacheInterceptorTest {
 
     @Mock
-    private Signer mockSigner;
+    private Signer mockPrimarySigner;
+
+    @Mock
+    private software.amazon.awssdk.core.signer.Signer mockSigV4ASigner;
+
     @Mock
     private AWSCredentialsProvider mockPrimaryCredentialsProvider;
     @Mock
@@ -32,8 +37,8 @@ public class ResourceBasedAWSRequestSigningApacheInterceptorTest {
     @Before
     public void setUp() {
         MockitoAnnotations.initMocks(this);
-        AWSRequestSigningApacheInterceptor primaryInterceptorSpy = spy(new AWSRequestSigningApacheInterceptor("es", mockSigner, mockPrimaryCredentialsProvider));
-        AWSRequestSigningApacheInterceptor metadataInterceptorSpy = spy(new AWSRequestSigningApacheInterceptor("es", mockSigner, mockMetadataAccessCredentialsProvider));
+        HttpRequestInterceptor primaryInterceptorSpy = spy(new AWSRequestSigningApacheInterceptor("es", mockPrimarySigner, mockPrimaryCredentialsProvider));
+        HttpRequestInterceptor metadataInterceptorSpy = spy(new AWSRequestSigV4ASigningApacheInterceptor("es", "us-east-1", mockSigV4ASigner, mockMetadataAccessCredentialsProvider));
 
         interceptor = new ResourceBasedAWSRequestSigningApacheInterceptor(
                 "es",

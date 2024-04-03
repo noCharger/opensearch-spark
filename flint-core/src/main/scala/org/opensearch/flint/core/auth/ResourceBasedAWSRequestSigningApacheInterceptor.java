@@ -1,12 +1,13 @@
 package org.opensearch.flint.core.auth;
 
+import com.amazonaws.auth.AWS4Signer;
 import com.amazonaws.auth.AWSCredentialsProvider;
-import com.amazonaws.auth.Signer;
 import org.apache.http.HttpException;
 import org.apache.http.HttpRequest;
 import org.apache.http.HttpRequestInterceptor;
 import org.apache.http.client.utils.URIBuilder;
 import org.apache.http.protocol.HttpContext;
+import software.amazon.awssdk.authcrt.signer.AwsCrtV4aSigner;
 
 import java.io.IOException;
 import java.net.URISyntaxException;
@@ -19,8 +20,8 @@ public class ResourceBasedAWSRequestSigningApacheInterceptor implements HttpRequ
 
     private final String service;
     private final String metadataAccessIdentifier;
-    final AWSRequestSigningApacheInterceptor primaryInterceptor;
-    final AWSRequestSigningApacheInterceptor metadataAccessInterceptor;
+    final HttpRequestInterceptor primaryInterceptor;
+    final HttpRequestInterceptor metadataAccessInterceptor;
 
     /**
      * Constructs an interceptor for AWS request signing with optional metadata access.
@@ -32,20 +33,23 @@ public class ResourceBasedAWSRequestSigningApacheInterceptor implements HttpRequ
      * @param metadataAccessIdentifier            Identifier for operations requiring metadata access.
      */
     public ResourceBasedAWSRequestSigningApacheInterceptor(final String service,
-                                                           final Signer signer,
+                                                           final String region,
                                                            final AWSCredentialsProvider primaryCredentialsProvider,
                                                            final AWSCredentialsProvider metadataAccessCredentialsProvider,
                                                            final String metadataAccessIdentifier) {
-        this(service,
-                new AWSRequestSigningApacheInterceptor(service, signer, primaryCredentialsProvider),
-                new AWSRequestSigningApacheInterceptor(service, signer, metadataAccessCredentialsProvider),
-                metadataAccessIdentifier);
+        this.service = service == null ? "unknown" : service;
+        AWS4Signer signer = new AWS4Signer();
+        signer.setServiceName(service);
+        signer.setRegionName(region);
+        this.primaryInterceptor = new AWSRequestSigningApacheInterceptor(service, signer, primaryCredentialsProvider);
+        this.metadataAccessInterceptor = new AWSRequestSigV4ASigningApacheInterceptor(service, region, AwsCrtV4aSigner.builder().build(), metadataAccessCredentialsProvider);
+        this.metadataAccessIdentifier = metadataAccessIdentifier;
     }
 
     // Test constructor allowing injection of mock interceptors
     ResourceBasedAWSRequestSigningApacheInterceptor(final String service,
-                                                    final AWSRequestSigningApacheInterceptor primaryInterceptor,
-                                                    final AWSRequestSigningApacheInterceptor metadataAccessInterceptor,
+                                                    final HttpRequestInterceptor primaryInterceptor,
+                                                    final HttpRequestInterceptor metadataAccessInterceptor,
                                                     final String metadataAccessIdentifier) {
         this.service = service == null ? "unknown" : service;
         this.primaryInterceptor = primaryInterceptor;
