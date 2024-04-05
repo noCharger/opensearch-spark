@@ -275,7 +275,11 @@ public class FlintOpenSearchClient implements FlintClient {
       if (Strings.isNullOrEmpty(metadataAccessProviderClass)) {
         metadataAccessAWSCredentialsProvider.set(customAWSCredentialsProvider.get());
       } else {
-        instantiateProvider(metadataAccessProviderClass, metadataAccessAWSCredentialsProvider);
+        try {
+          instantiateProvider(metadataAccessProviderClass, metadataAccessAWSCredentialsProvider);
+        } catch (Exception e) {
+          LOG.warning("Failed to instantiate AWSCredentialsProvider for metadata access: " + metadataAccessProviderClass);
+        }
       }
 
       restClientBuilder.setHttpClientConfigCallback(builder -> {
