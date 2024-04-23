@@ -28,17 +28,19 @@ import org.apache.spark.sql.types._
  */
 object FlintJob extends Logging with FlintJobExecutor {
   def main(args: Array[String]): Unit = {
-    val (queryOption, resultIndex) = args.length match {
+    val (queryOption, resultIndexOption) = args.length match {
+      case 0 =>
+        (None, None) // Allow no arg for nexus demo
       case 1 =>
-        (None, args(0)) // Starting from OS 2.13, resultIndex is the only argument
+        (None, Some(args(0))) // Starting from OS 2.13, resultIndex is the only argument
       case 2 =>
         (
           Some(args(0)),
-          args(1)
+          Some(args(1))
         ) // Before OS 2.13, there are two arguments, the second one is resultIndex
       case _ =>
         throw new IllegalArgumentException(
-          "Unsupported number of arguments. Expected 1 or 2 arguments.")
+          "Unsupported number of arguments. Expected at most 2 arguments.")
     }
 
     val conf = createSparkConf()
@@ -48,6 +50,9 @@ object FlintJob extends Logging with FlintJobExecutor {
 
     val dataSource = conf.get("spark.flint.datasource.name", "")
     val query = queryOption.getOrElse(unescapeQuery(conf.get(FlintSparkConf.QUERY.key, "")))
+    val queryId = conf.get("spark.flint.job.queryId", "")
+    val resultIndex = resultIndexOption.getOrElse("")
+
     if (query.isEmpty) {
       throw new IllegalArgumentException(s"Query undefined for the ${jobType} job.")
     }
@@ -62,9 +67,10 @@ object FlintJob extends Logging with FlintJobExecutor {
     conf.set("spark.sql.defaultCatalog", dataSource)
     val streamingRunningCount = new AtomicInteger(0)
     val jobOperator =
-      JobOperator(
+      JobOperatorFactory(
         createSparkSession(conf),
         query,
+        queryId,
         dataSource,
         resultIndex,
         jobType.equalsIgnoreCase("streaming"),

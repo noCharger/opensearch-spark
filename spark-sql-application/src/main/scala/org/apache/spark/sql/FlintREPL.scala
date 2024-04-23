@@ -93,9 +93,10 @@ object FlintREPL extends Logging with FlintJobExecutor {
       logInfo(s"""streaming query ${query}""")
       val streamingRunningCount = new AtomicInteger(0)
       val jobOperator =
-        JobOperator(
+        JobOperatorFactory(
           createSparkSession(conf),
           query,
+          "",
           dataSource,
           resultIndex,
           true,

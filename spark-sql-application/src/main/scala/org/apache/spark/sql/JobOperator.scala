@@ -20,19 +20,59 @@ import org.apache.spark.sql.flint.config.FlintSparkConf
 import org.apache.spark.sql.util.ShuffleCleaner
 import org.apache.spark.util.ThreadUtils
 
-case class JobOperator(
+trait JobExecution {
+  def start(): Unit
+  def stop(): Unit
+}
+
+abstract class JobOperator(spark: SparkSession) extends JobExecution with Logging {
+  def start(): Unit
+  def stop(): Unit = {
+    Try {
+      spark.stop()
+      logInfo("stopped spark session")
+    } match {
+      case Success(_) =>
+      case Failure(e) => logError("unexpected error while stopping spark session", e)
+    }
+  }
+}
+
+object JobOperatorFactory {
+  def apply(
+      spark: SparkSession,
+      query: String,
+      queryId: String,
+      dataSource: String,
+      resultIndex: String,
+      streaming: Boolean,
+      streamingRunningCount: AtomicInteger): JobOperator = {
+    // TODO: Refactor this hardcode logic to support custom job operator
+    if (queryId.startsWith("cwl-")) {
+      new CWLJobOperator(spark, query, queryId, dataSource)
+    } else {
+      new FlintJobOperator(
+        spark,
+        query,
+        dataSource,
+        resultIndex,
+        streaming,
+        streamingRunningCount)
+    }
+  }
+}
+
+class FlintJobOperator(
     spark: SparkSession,
     query: String,
     dataSource: String,
     resultIndex: String,
     streaming: Boolean,
     streamingRunningCount: AtomicInteger)
-    extends Logging
+    extends JobOperator(spark)
     with FlintJobExecutor {
-
   // JVM shutdown hook
   sys.addShutdownHook(stop())
-
   def start(): Unit = {
     val threadPool = ThreadUtils.newDaemonFixedThreadPool(1, "check-create-index")
     implicit val executionContext = ExecutionContext.fromExecutor(threadPool)
@@ -73,8 +113,7 @@ case class JobOperator(
       cleanUpResources(exceptionThrown, threadPool, dataToWrite, resultIndex, osClient)
     }
   }
-
-  def cleanUpResources(
+  protected def cleanUpResources(
       exceptionThrown: Boolean,
       threadPool: ThreadPoolExecutor,
       dataToWrite: Option[DataFrame],
@@ -119,16 +158,6 @@ case class JobOperator(
     }
   }
 
-  def stop(): Unit = {
-    Try {
-      spark.stop()
-      logInfo("stopped spark session")
-    } match {
-      case Success(_) =>
-      case Failure(e) => logError("unexpected error while stopping spark session", e)
-    }
-  }
-
   /**
    * Records the completion of a streaming job by updating the appropriate metrics. This method
    * decrements the running metric for streaming jobs and increments either the success or failure
@@ -148,5 +177,15 @@ case class JobOperator(
       case false => incrementCounter(MetricConstants.STREAMING_SUCCESS_METRIC)
     }
   }
+}
 
+class CWLJobOperator(spark: SparkSession, query: String, queryId: String, dataSource: String)
+    extends JobOperator(spark) {
+
+  def start(): Unit = {
+    logInfo("Starting CWL job")
+    spark.sparkContext.setJobGroup(queryId, "Job group for " + queryId, interruptOnCancel = true)
+    val result: DataFrame = spark.sql(query)
+    // TODO: write data frame into egress
+  }
 }

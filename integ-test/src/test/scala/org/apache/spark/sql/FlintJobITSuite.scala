@@ -73,11 +73,25 @@ class FlintJobITSuite extends FlintSparkSuite with JobTest {
 
     val futureResult = Future {
       val job =
-        JobOperator(spark, query, dataSourceName, resultIndex, true, streamingRunningCount)
-      job.envinromentProvider = new MockEnvironment(
-        Map("SERVERLESS_EMR_JOB_ID" -> jobRunId, "SERVERLESS_EMR_VIRTUAL_CLUSTER_ID" -> appId))
-      job.terminateJVM = false
-      job.start()
+        JobOperatorFactory(
+          spark,
+          query,
+          "",
+          dataSource = dataSourceName,
+          resultIndex = resultIndex,
+          streaming = true,
+          streamingRunningCount = streamingRunningCount)
+      job match {
+        case flintJob: FlintJobOperator =>
+          flintJob.envinromentProvider = new MockEnvironment(
+            Map(
+              "SERVERLESS_EMR_JOB_ID" -> jobRunId,
+              "SERVERLESS_EMR_VIRTUAL_CLUSTER_ID" -> appId))
+          flintJob.terminateJVM = false
+          flintJob.start()
+        case _ =>
+          logError("Unsupported job type")
+      }
     }
     futureResult.onComplete {
       case Success(result) => logInfo(s"Success result: $result")
