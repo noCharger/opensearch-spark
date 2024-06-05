@@ -3,34 +3,40 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-package org.opensearch.flint.app
+package org.opensearch.flint.data
 
 import java.util.{Map => JavaMap}
 
 import scala.collection.JavaConverters._
-import scala.collection.mutable
 
 import org.json4s.{Formats, JNothing, JNull, NoTypeHints}
 import org.json4s.JsonAST.{JArray, JString}
 import org.json4s.native.JsonMethods.parse
 import org.json4s.native.Serialization
 
-// lastUpdateTime is added to FlintInstance to track the last update time of the instance. Its unit is millisecond.
 class FlintInstance(
     val applicationId: String,
     val jobId: String,
-    // sessionId is the session type doc id
     val sessionId: String,
     var state: String,
     val lastUpdateTime: Long,
     val jobStartTime: Long = 0,
     val excludedJobIds: Seq[String] = Seq.empty[String],
-    val error: Option[String] = None) {
+    val error: Option[String] = None,
+    sessionContext: Map[String, Any] = Map.empty[String, Any])
+    extends ContextualData {
+  context = sessionContext // Initialize the context from the constructor
+
+  def isRunning: Boolean = state == "running"
+  def isComplete: Boolean = state == "complete"
+  def isFailed: Boolean = state == "failed"
+  def isWaiting: Boolean = state == "waiting"
+
   override def toString: String = {
     val excludedJobIdsStr = excludedJobIds.mkString("[", ", ", "]")
     val errorStr = error.getOrElse("None")
     s"FlintInstance(applicationId=$applicationId, jobId=$jobId, sessionId=$sessionId, state=$state, " +
-      s"lastUpdateTime=$lastUpdateTime, jobStartTime=$jobStartTime, excludedJobIds=$excludedJobIdsStr, error=$errorStr)"
+      s"lastUpdateTime=$lastUpdateTime, jobStartTime=$jobStartTime, excludedJobIds=$excludedJobIdsStr, error=$errorStr, context=$context)"
   }
 }
 

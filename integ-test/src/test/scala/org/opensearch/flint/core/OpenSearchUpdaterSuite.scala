@@ -10,7 +10,6 @@ import scala.collection.JavaConverters.mapAsJavaMapConverter
 import org.opensearch.action.get.{GetRequest, GetResponse}
 import org.opensearch.client.RequestOptions
 import org.opensearch.flint.OpenSearchTransactionSuite
-import org.opensearch.flint.app.FlintInstance
 import org.opensearch.flint.core.storage.{FlintOpenSearchClient, OpenSearchUpdater}
 import org.scalatest.matchers.should.Matchers
 

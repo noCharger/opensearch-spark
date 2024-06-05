@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-package org.opensearch.flint.app
+package org.opensearch.flint.data
 
 import org.json4s.{Formats, NoTypeHints}
 import org.json4s.JsonAST.JString
@@ -17,38 +17,21 @@ class FlintCommand(
     val statementId: String,
     val queryId: String,
     val submitTime: Long,
-    var error: Option[String] = None) {
-  def running(): Unit = {
-    state = "running"
-  }
+    var error: Option[String] = None,
+    commandContext: Map[String, Any] = Map.empty[String, Any])
+    extends ContextualData {
+  context = commandContext
 
-  def complete(): Unit = {
-    state = "success"
-  }
+  def running(): Unit = state = "running"
+  def complete(): Unit = state = "success"
+  def fail(): Unit = state = "failed"
+  def isRunning: Boolean = state == "running"
+  def isComplete: Boolean = state == "success"
+  def isFailed: Boolean = state == "failed"
+  def isWaiting: Boolean = state == "waiting"
 
-  def fail(): Unit = {
-    state = "failed"
-  }
-
-  def isRunning(): Boolean = {
-    state == "running"
-  }
-
-  def isComplete(): Boolean = {
-    state == "success"
-  }
-
-  def isFailed(): Boolean = {
-    state == "failed"
-  }
-
-  def isWaiting(): Boolean = {
-    state == "waiting"
-  }
-
-  override def toString: String = {
-    s"FlintCommand(state=$state, query=$query, statementId=$statementId, queryId=$queryId, submitTime=$submitTime, error=$error)"
-  }
+  override def toString: String =
+    s"FlintCommand(state=$state, query=$query, statementId=$statementId, queryId=$queryId, submitTime=$submitTime, error=$error, context=$context)"
 }
 
 object FlintCommand {

@@ -18,13 +18,14 @@ import com.codahale.metrics.Timer
 import org.json4s.native.Serialization
 import org.opensearch.action.get.GetResponse
 import org.opensearch.common.Strings
-import org.opensearch.flint.app.{FlintCommand, FlintInstance}
-import org.opensearch.flint.app.FlintInstance.formats
 import org.opensearch.flint.core.FlintOptions
 import org.opensearch.flint.core.logging.CustomLogging
 import org.opensearch.flint.core.metrics.MetricConstants
 import org.opensearch.flint.core.metrics.MetricsUtil.{getTimerContext, incrementCounter, registerGauge, stopTimer}
 import org.opensearch.flint.core.storage.{FlintReader, OpenSearchUpdater}
+import org.opensearch.flint.data.FlintCommand
+import org.opensearch.flint.data.FlintInstance
+import org.opensearch.flint.data.FlintInstance.formats
 import org.opensearch.search.sort.SortOrder
 
 import org.apache.spark.SparkConf
@@ -622,7 +623,7 @@ object FlintREPL extends Logging with FlintJobExecutor {
       statementTimerContext: Timer.Context): Unit = {
     try {
       dataToWrite.foreach(df => writeDataFrameToOpensearch(df, resultIndex, osClient))
-      if (flintCommand.isRunning() || flintCommand.isWaiting()) {
+      if (flintCommand.isRunning || flintCommand.isWaiting) {
         // we have set failed state in exception handling
         flintCommand.complete()
       }
@@ -1137,9 +1138,9 @@ object FlintREPL extends Logging with FlintJobExecutor {
     if (statementRunningCount.get() > 0) {
       statementRunningCount.decrementAndGet()
     }
-    if (flintCommand.isComplete()) {
+    if (flintCommand.isComplete) {
       incrementCounter(MetricConstants.STATEMENT_SUCCESS_METRIC)
-    } else if (flintCommand.isFailed()) {
+    } else if (flintCommand.isFailed) {
       incrementCounter(MetricConstants.STATEMENT_FAILED_METRIC)
     }
   }
