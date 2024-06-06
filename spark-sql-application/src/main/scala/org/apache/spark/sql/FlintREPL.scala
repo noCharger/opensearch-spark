@@ -23,8 +23,7 @@ import org.opensearch.flint.core.logging.CustomLogging
 import org.opensearch.flint.core.metrics.MetricConstants
 import org.opensearch.flint.core.metrics.MetricsUtil.{getTimerContext, incrementCounter, registerGauge, stopTimer}
 import org.opensearch.flint.core.storage.{FlintReader, OpenSearchUpdater}
-import org.opensearch.flint.data.FlintCommand
-import org.opensearch.flint.data.FlintInstance
+import org.opensearch.flint.data.{FlintCommand, FlintInstance}
 import org.opensearch.flint.data.FlintInstance.formats
 import org.opensearch.search.sort.SortOrder
 
@@ -32,7 +31,7 @@ import org.apache.spark.SparkConf
 import org.apache.spark.internal.Logging
 import org.apache.spark.scheduler.{SparkListener, SparkListenerApplicationEnd}
 import org.apache.spark.sql.flint.config.FlintSparkConf
-import org.apache.spark.util.ThreadUtils
+import org.apache.spark.util.{ThreadUtils, Utils}
 
 /**
  * Spark SQL Application entrypoint
@@ -622,7 +621,12 @@ object FlintREPL extends Logging with FlintJobExecutor {
       osClient: OSClient,
       statementTimerContext: Timer.Context): Unit = {
     try {
-      dataToWrite.foreach(df => writeDataFrameToOpensearch(df, resultIndex, osClient))
+      // dataToWrite.foreach(df => writeDataFrameToOpensearch(df, resultIndex, osClient))
+      val options = FlintSparkConf().flintOptions()
+      val queryResultWriter =
+        instantiateProvider[QueryResultWriter](options.getCustomQueryResultWriter)
+      queryResultWriter.write(dataToWrite.get, command = flintCommand)
+
       if (flintCommand.isRunning || flintCommand.isWaiting) {
         // we have set failed state in exception handling
         flintCommand.complete()
@@ -638,6 +642,18 @@ object FlintREPL extends Logging with FlintJobExecutor {
         flintCommand.fail()
         updateSessionIndex(flintCommand, flintSessionIndexUpdater)
         recordStatementStateChange(flintCommand, statementTimerContext)
+    }
+  }
+
+  private def instantiateProvider[T](className: String): T = {
+    try {
+      val providerClass = Utils.classForName(className)
+      val ctor = providerClass.getDeclaredConstructor()
+      ctor.setAccessible(true)
+      ctor.newInstance().asInstanceOf[T]
+    } catch {
+      case e: Exception =>
+        throw new RuntimeException(s"Failed to instantiate provider: $className", e)
     }
   }
 

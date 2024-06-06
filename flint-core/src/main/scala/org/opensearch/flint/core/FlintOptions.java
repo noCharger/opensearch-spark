@@ -88,6 +88,8 @@ public class FlintOptions implements Serializable {
 
   public static final String BATCH_BYTES = "write.batch_bytes";
 
+  public static final String CUSTOM_QUERY_RESULT_WRITER = "customQueryResultWriter";
+
   public static final String DEFAULT_BATCH_BYTES = "1mb";
 
   public FlintOptions(Map<String, String> options) {
@@ -155,6 +157,10 @@ public class FlintOptions implements Serializable {
 
   public String getSystemIndexName() {
     return options.getOrDefault(SYSTEM_INDEX_KEY_NAME, "");
+  }
+
+  public String getCustomQueryResultWriter() {
+    return options.getOrDefault(CUSTOM_QUERY_RESULT_WRITER, "");
   }
 
   public int getBatchBytes() {

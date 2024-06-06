@@ -95,6 +95,7 @@ lazy val flintData = (project in file("flint-data"))
       "org.scalatest" %% "scalatest" % "3.2.15" % "test",
       "org.scalatestplus" %% "mockito-4-6" % "3.2.15.0" % "test"
     ),
+    libraryDependencies ++= deps(sparkVersion),
     publish / skip := true,
     assembly / test := {}, // Disable tests in assembly
     assembly / assemblyOption ~= {
