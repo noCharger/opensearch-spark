@@ -13,6 +13,7 @@ import org.json4s.native.Serialization
 object CommandStates {
   val RUNNING = "running"
   val SUCCESS = "success"
+  val TIMEOUT = "timeout"
   val FAILED = "failed"
   val WAITING = "waiting"
 }
@@ -49,9 +50,11 @@ class FlintCommand(
 
   def running(): Unit = state = CommandStates.RUNNING
   def complete(): Unit = state = CommandStates.SUCCESS
+  def timeout(): Unit = state = CommandStates.TIMEOUT
   def fail(): Unit = state = CommandStates.FAILED
   def isRunning: Boolean = state == CommandStates.RUNNING
   def isComplete: Boolean = state == CommandStates.SUCCESS
+  def isTimeout: Boolean = state == CommandStates.TIMEOUT
   def isFailed: Boolean = state == CommandStates.FAILED
   def isWaiting: Boolean = state == CommandStates.WAITING
 

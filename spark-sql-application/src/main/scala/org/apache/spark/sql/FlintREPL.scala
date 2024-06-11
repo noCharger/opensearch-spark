@@ -23,7 +23,7 @@ import org.opensearch.flint.core.logging.CustomLogging
 import org.opensearch.flint.core.metrics.MetricConstants
 import org.opensearch.flint.core.metrics.MetricsUtil.{getTimerContext, incrementCounter, registerGauge, stopTimer}
 import org.opensearch.flint.core.storage.{FlintReader, OpenSearchUpdater}
-import org.opensearch.flint.data.{FlintCommand, InteractiveSession}
+import org.opensearch.flint.data.{CommandStates, FlintCommand, InteractiveSession}
 import org.opensearch.flint.data.InteractiveSession.formats
 import org.opensearch.search.sort.SortOrder
 
@@ -519,8 +519,9 @@ object FlintREPL extends Logging with FlintJobExecutor {
       error: String,
       flintCommand: FlintCommand,
       sessionId: String,
-      startTime: Long): DataFrame = {
-    flintCommand.fail()
+      startTime: Long,
+      commandState: String = CommandStates.FAILED): DataFrame = {
+    flintCommand.state = commandState
     flintCommand.error = Some(error)
     super.getFailedData(
       spark,
@@ -667,7 +668,8 @@ object FlintREPL extends Logging with FlintJobExecutor {
         error,
         flintCommand,
         sessionId,
-        startTime))
+        startTime,
+        CommandStates.TIMEOUT))
   }
 
   def executeAndHandle(
@@ -1139,7 +1141,7 @@ object FlintREPL extends Logging with FlintJobExecutor {
     }
     if (flintCommand.isComplete) {
       incrementCounter(MetricConstants.STATEMENT_SUCCESS_METRIC)
-    } else if (flintCommand.isFailed) {
+    } else if (flintCommand.isTimeout || flintCommand.isFailed) {
       incrementCounter(MetricConstants.STATEMENT_FAILED_METRIC)
     }
   }
