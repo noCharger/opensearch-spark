@@ -11,8 +11,7 @@ trait CommandLifecycleManager {
   def setWriter(writer: REPLWriter): Unit
   def setLocalProperties(commandDetails: FlintCommand): Unit
   def prepareCommandLifecycle(): Either[String, Unit]
-  def initCommandLifecycle(sessionId: String): FlintCommand
   def closeCommandLifecycle(): Unit
-  def hasPendingCommand(sessionId: String): Boolean
+  def getNextCommand(sessionId: String, commandState: String): Option[FlintCommand]
   def updateCommandDetails(commandDetails: FlintCommand): Unit
 }

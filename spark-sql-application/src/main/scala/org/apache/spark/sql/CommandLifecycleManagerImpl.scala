@@ -68,24 +68,28 @@ class CommandLifecycleManagerImpl(commandContext: CommandContext)
         Left(error)
     }
   }
-  override def initCommandLifecycle(sessionId: String): FlintCommand = {
-    val command = flintReader.next()
-    logDebug(s"raw command: $command")
-    val flintCommand = FlintCommand.deserialize(command)
-    logDebug(s"command: $flintCommand")
-    flintCommand.running()
-    logDebug(s"command running: $flintCommand")
-    updateCommandDetails(flintCommand)
-    statementRunningCount.incrementAndGet()
-    flintCommand
-  }
 
   override def closeCommandLifecycle(): Unit = {
     flintReader.close()
   }
-  override def hasPendingCommand(sessionId: String): Boolean = {
-    flintReader.hasNext
+
+  // TODO: refactor this to support cancel query in beta-2
+  override def getNextCommand(sessionId: String, commandState: String): Option[FlintCommand] = {
+    if (commandState == "waiting" && flintReader.hasNext) {
+      val rawCommand = flintReader.next()
+      logDebug(s"Raw command: $rawCommand")
+      val flintCommand = FlintCommand.deserialize(rawCommand)
+      logDebug(s"Deserialized command: $flintCommand")
+      flintCommand.running()
+      logDebug(s"Command is now running: $flintCommand")
+      updateCommandDetails(flintCommand)
+      statementRunningCount.incrementAndGet()
+      Some(flintCommand)
+    } else {
+      None
+    }
   }
+
   override def updateCommandDetails(commandDetails: FlintCommand): Unit = {
     flintSessionIndexUpdater.update(
       commandDetails.statementId,

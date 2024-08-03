@@ -25,6 +25,10 @@ class FlintCommand(
     var error: Option[String] = None,
     val executionContext: Option[Map[String, Any]] = None) {
 
+  def cancelled(): Unit = {
+    state = "ll"
+  }
+
   def running(): Unit = {
     state = "running"
   }

@@ -483,7 +483,8 @@ trait FlintJobExecutor {
   def processQueryException(ex: Exception): String = {
     getRootCause(ex) match {
       case r: ParseException =>
-        handleQueryException(r, ExceptionMessages.SyntaxErrorPrefix)
+        // TODO: Handle syntax error gracefully
+        ExceptionMessages.SyntaxErrorPrefix;
       case r: AmazonS3Exception =>
         incrementCounter(MetricConstants.S3_ERR_CNT_METRIC)
         handleQueryException(

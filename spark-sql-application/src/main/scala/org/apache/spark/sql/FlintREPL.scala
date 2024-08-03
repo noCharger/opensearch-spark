@@ -440,33 +440,40 @@ object FlintREPL extends Logging with FlintJobExecutor {
         lastCanPickCheckTime = currentTime
       }
 
+      val commandToCancel = commandLifecycleManager.getNextCommand(sessionId, "canceling")
       if (!canPickNextStatementResult) {
         earlyExitFlag = true
         canProceed = false
-      } else if (!commandLifecycleManager.hasPendingCommand(sessionId)) {
-        canProceed = false
+      } else if (!commandToCancel.isEmpty) {
+        cancelCommand(spark, commandLifecycleManager, commandToCancel.get)
       } else {
-        val flintCommand = commandLifecycleManager.initCommandLifecycle(sessionId)
-        val (dataToWrite, returnedVerificationResult) =
-          processStatementOnVerification(flintCommand, state, context)
+        val flintCommandOption = commandLifecycleManager.getNextCommand(sessionId, "waiting")
+        flintCommandOption match {
+          case None =>
+            canProceed = false
+          // No change on this block
+          case Some(flintCommand) =>
+            val (dataToWrite, returnedVerificationResult) =
+              processStatementOnVerification(flintCommand, state, context)
 
-        verificationResult = returnedVerificationResult
-        try {
-          dataToWrite.foreach(df => logInfo("DF: " + df))
+            verificationResult = returnedVerificationResult
+            try {
+              dataToWrite.foreach(df => logInfo("DF: " + df))
 
-          if (flintCommand.isRunning() || flintCommand.isWaiting()) {
-            // we have set failed state in exception handling
-            flintCommand.complete()
-          }
-          commandLifecycleManager.updateCommandDetails(flintCommand)
-        } catch {
-          // e.g., maybe due to authentication service connection issue
-          // or invalid catalog (e.g., we are operating on data not defined in provided data source)
-          case e: Exception =>
-            val error = s"""Fail to write result of ${flintCommand}, cause: ${e.getMessage}"""
-            CustomLogging.logError(error, e)
-            flintCommand.fail()
-            commandLifecycleManager.updateCommandDetails(flintCommand)
+              if (flintCommand.isRunning() || flintCommand.isWaiting()) {
+                // we have set failed state in exception handling
+                flintCommand.complete()
+              }
+              commandLifecycleManager.updateCommandDetails(flintCommand)
+            } catch {
+              // e.g., maybe due to authentication service connection issue
+              // or invalid catalog (e.g., we are operating on data not defined in provided data source)
+              case e: Exception =>
+                val error = s"""Fail to write result of ${flintCommand}, cause: ${e.getMessage}"""
+                CustomLogging.logError(error, e)
+                flintCommand.fail()
+                commandLifecycleManager.updateCommandDetails(flintCommand)
+            }
         }
         // last query finish time is last activity time
         lastActivityTime = currentTimeProvider.currentEpochMillis()
@@ -506,6 +513,18 @@ object FlintREPL extends Logging with FlintJobExecutor {
       commandLifecycleManager,
       sessionId,
       startTime)
+  }
+
+  // Support cancel query in execution loop
+  private def cancelCommand(
+      sparkSession: SparkSession,
+      commandLifecycleManager: CommandLifecycleManager,
+      flintCommand: FlintCommand): Unit = {
+    logInfo(s"Cancelling command: ${flintCommand.queryId}")
+    sparkSession.sparkContext.cancelJobGroup(flintCommand.queryId)
+    flintCommand.cancelled()
+    commandLifecycleManager.updateCommandDetails(flintCommand)
+    logInfo(s"Cancelled command: ${flintCommand.queryId}")
   }
 
   // TODO: Refactor
