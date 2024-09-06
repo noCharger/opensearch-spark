@@ -22,13 +22,8 @@ import org.apache.spark.sql.util.ShuffleCleaner
 import org.apache.spark.util.ThreadUtils
 
 case class JobOperator(
-    applicationId: String,
-    jobId: String,
-    spark: SparkSession,
-    query: String,
-    dataSource: String,
-    resultIndex: String,
-    streaming: Boolean,
+    commandContext: CommandContext,
+    statementsExecutionManager: StatementExecutionManager,
     streamingRunningCount: AtomicInteger)
     extends Logging
     with FlintJobExecutor {
@@ -37,6 +32,7 @@ case class JobOperator(
   sys.addShutdownHook(stop())
 
   def start(): Unit = {
+    import commandContext._
     val threadPool = ThreadUtils.newDaemonFixedThreadPool(1, "check-create-index")
     implicit val executionContext = ExecutionContext.fromExecutor(threadPool)
 
@@ -50,13 +46,15 @@ case class JobOperator(
     val osClient = new OSClient(FlintSparkConf().flintOptions())
     var exceptionThrown = true
     try {
-      val futureMappingCheck = Future {
-        checkAndCreateIndex(osClient, resultIndex)
+      var futurePrepareQueryExecution: Future {
+        statementsExecutionManager.prepareStatementExecution()
       }
-      val data = executeQuery(applicationId, jobId, spark, query, dataSource, "", "", streaming)
 
-      val mappingCheckResult = ThreadUtils.awaitResult(futureMappingCheck, Duration(1, MINUTES))
-      dataToWrite = Some(mappingCheckResult match {
+      val flintStatement = statementsExecutionManager.getNextStatement()
+      val data = statementsExecutionManager.executeStatement(flintStatement)
+
+      val prepareStatementExecutionResult = ThreadUtils.awaitResult(futurePrepareQueryExecution, Duration(1, MINUTES))
+      dataToWrite = Some(prepareStatementExecutionResult match {
         case Right(_) => data
         case Left(error) =>
           constructErrorDF(
@@ -70,6 +68,8 @@ case class JobOperator(
             query,
             "",
             startTime)
+          flintStatement.fail()
+          flintStatement.error = Some(error)
       })
       exceptionThrown = false
     } catch {
@@ -88,6 +88,8 @@ case class JobOperator(
             query,
             "",
             startTime))
+        flintStatement.fail()
+        flintStatement.error = Some(error)
       case e: Exception =>
         val error = processQueryException(e)
         dataToWrite = Some(
@@ -102,8 +104,11 @@ case class JobOperator(
             query,
             "",
             startTime))
+        flintStatement.fail()
+        flintStatement.error = Some(error)
     } finally {
-      cleanUpResources(exceptionThrown, threadPool, dataToWrite, resultIndex, osClient)
+      statementsExecutionManager.updateStatement(flintStatement)
+      cleanUpResources(exceptionThrown, threadPool, dataToWrite, resultIndex, osClient, flintStatement)
     }
   }
 
@@ -111,8 +116,7 @@ case class JobOperator(
       exceptionThrown: Boolean,
       threadPool: ThreadPoolExecutor,
       dataToWrite: Option[DataFrame],
-      resultIndex: String,
-      osClient: OSClient): Unit = {
+      flintStatement: FlintStatement): Unit = {
     try {
       dataToWrite.foreach(df => writeDataFrameToOpensearch(df, resultIndex, osClient))
     } catch {

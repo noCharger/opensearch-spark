@@ -13,6 +13,7 @@ import org.opensearch.flint.core.storage.{FlintReader, OpenSearchUpdater}
 case class CommandContext(
     applicationId: String,
     jobId: String,
+    jobType: String,
     spark: SparkSession,
     dataSource: String,
     sessionId: String,
