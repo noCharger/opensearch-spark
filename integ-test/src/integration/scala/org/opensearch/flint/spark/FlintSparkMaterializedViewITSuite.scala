@@ -332,6 +332,52 @@ class FlintSparkMaterializedViewITSuite extends FlintSparkSuite {
     }
   }
 
+  test("create materialized view with struct nested table") {
+    val testTable = s"$catalogName.default.struct_nested_test"
+    val testMvName = s"$catalogName.default.struct_nested_mv"
+    val testFlintIndex = getFlintIndexName(testMvName)
+    val testQuery =
+      s"""
+         | SELECT
+         |   struct_col.field1.subfield AS subfield,
+         |   struct_col.field2 AS field2
+         | FROM $testTable
+         |""".stripMargin
+
+    withTempDir { checkpointDir =>
+      createStructNestedTable(testTable)
+
+      sql(s"""
+             | CREATE MATERIALIZED VIEW $testMvName
+             | AS $testQuery
+             | WITH (
+             |   auto_refresh = true,
+             |   checkpoint_location = '${checkpointDir.getAbsolutePath}',
+             |   watermark_delay = '1 Second'
+             | )
+             |""".stripMargin)
+
+      // Wait for streaming job to complete the current micro batch
+      val job = spark.streams.active.find(_.name == testFlintIndex)
+      job shouldBe defined
+      failAfter(streamingTimeout) {
+        job.get.processAllAvailable()
+      }
+
+      flint.describeIndex(testFlintIndex) shouldBe defined
+      checkAnswer(
+        flint.queryIndex(testFlintIndex).select("subfield", "field2"),
+        Seq(
+          Row("value1", 123),
+          Row("value2", 456),
+          Row("value3", 789),
+          Row("value4", 823),
+          Row("value5", 123),
+        )
+      )
+    }
+  }
+
   private def timestamp(ts: String): Timestamp = Timestamp.valueOf(ts)
 
   private def withIncrementalMaterializedView(query: String)(
