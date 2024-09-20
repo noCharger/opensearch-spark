@@ -59,6 +59,17 @@ class FlintSparkIndexJobITSuite extends OpenSearchTransactionSuite with Matchers
     latestLogEntry(latestId) should contain("state" -> "refreshing")
   }
 
+  test("recover should succeed if index exists and is auto refreshed with external scheduler") {
+    flint
+      .skippingIndex()
+      .onTable(testTable)
+      .addPartitions("year")
+      .options(FlintSparkIndexOptions(Map("auto_refresh" -> "true", "scheduler_mode" -> "external")), testIndex)
+      .create()
+
+    flint.recoverIndex(testIndex) shouldBe false
+  }
+
   Seq(EMPTY, CREATING, DELETING, DELETED, RECOVERING, UNKNOWN).foreach { state =>
     test(s"recover should fail if index is in $state state") {
       flint
