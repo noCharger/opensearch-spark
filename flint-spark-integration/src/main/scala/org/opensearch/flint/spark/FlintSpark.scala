@@ -337,10 +337,16 @@ class FlintSpark(val spark: SparkSession) extends FlintSparkTransactionSupport w
             latest.copy(state = REFRESHING)
           })
           .commit(_ => {
-            FlintSparkIndexRefresh
-              .create(indexName, index.get)
-              .start(spark, flintSparkConf)
-            true
+            if (isExternalSchedulerEnabled(index.get)) {
+              handleAsyncQueryScheduler(index.get, AsyncQuerySchedulerAction.UPDATE)
+              // The actual refreshing job is handled by the external scheduler
+              false
+            } else {
+              FlintSparkIndexRefresh
+                .create(indexName, index.get)
+                .start(spark, flintSparkConf)
+              true
+            }
           })
       } else {
         logInfo("Index to be recovered either doesn't exist or not auto refreshed")
