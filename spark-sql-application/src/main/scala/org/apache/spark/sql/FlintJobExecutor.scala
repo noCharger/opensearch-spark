@@ -12,7 +12,6 @@ import com.amazonaws.services.s3.model.AmazonS3Exception
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.scala.DefaultScalaModule
 import org.apache.commons.text.StringEscapeUtils.unescapeJava
-import org.opensearch.common.Strings
 import org.opensearch.flint.core.IRestHighLevelClient
 import org.opensearch.flint.core.logging.{CustomLogging, ExceptionMessages, OperationMessage}
 import org.opensearch.flint.core.metrics.MetricConstants
@@ -534,7 +533,7 @@ trait FlintJobExecutor {
   }
 
   def instantiate[T](defaultConstructor: => T, className: String, args: Any*): T = {
-    if (Strings.isNullOrEmpty(className)) {
+    if (className.isEmpty) {
       defaultConstructor
     } else {
       try {
