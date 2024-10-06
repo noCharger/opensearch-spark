@@ -445,6 +445,9 @@ class FlintSpark(val spark: SparkSession) extends FlintSparkTransactionSupport w
   private def validateUpdateAllowed(
       originalOptions: FlintSparkIndexOptions,
       updatedOptions: FlintSparkIndexOptions): Unit = {
+    logInfo(s"originalOptions: ${originalOptions}")
+    logInfo(s"updatedOptions: ${updatedOptions}")
+
     val isAutoRefreshChanged = updatedOptions.autoRefresh() != originalOptions.autoRefresh()
     val isSchedulerModeChanged =
       updatedOptions.isExternalSchedulerEnabled() != originalOptions.isExternalSchedulerEnabled()
