@@ -50,7 +50,7 @@ class FlintSpark(val spark: SparkSession) extends FlintSparkTransactionSupport w
         IGNORE_DOC_ID_COLUMN.optionKey -> "true").asJava)
 
   /** Flint client for low-level index operation */
-  override protected val flintClient: FlintClient =
+  override val flintClient: FlintClient =
     FlintClientBuilder.build(flintSparkConf.flintOptions())
 
   private val flintIndexMetadataService: FlintIndexMetadataService = {

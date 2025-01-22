@@ -10,10 +10,12 @@ import java.util.Base64
 import scala.jdk.CollectionConverters.mapAsJavaMapConverter
 
 import com.stephenn.scalatest.jsonassert.JsonMatchers.matchJson
+import jodd.util.ThreadUtil.sleep
 import org.opensearch.action.get.GetRequest
+import org.opensearch.action.search.SearchRequest
 import org.opensearch.client.RequestOptions
 import org.opensearch.flint.common.FlintVersion.current
-import org.opensearch.flint.core.FlintOptions
+import org.opensearch.flint.core.{FlintClient, FlintClientBuilder, FlintOptions}
 import org.opensearch.flint.core.storage.{FlintOpenSearchIndexMetadataService, OpenSearchClientUtils}
 import org.opensearch.flint.spark.FlintSparkIndex.quotedTableName
 import org.opensearch.flint.spark.covering.FlintSparkCoveringIndex.getFlintIndexName
@@ -165,6 +167,20 @@ class FlintSparkCoveringIndexITSuite extends FlintSparkSuite {
         s"Checkpoint location dir should contain ${testFlintIndex}")
 
       conf.unsetConf(FlintSparkConf.CHECKPOINT_LOCATION_ROOT_DIR.key)
+      val request = new SearchRequest(testFlintIndex)
+      val response = flint.flintClient.createClient().search(request, RequestOptions.DEFAULT)
+
+      // If you want to print the pretty response
+      // scalastyle:off println
+      println(response.toString)
+
+      // Iterate through the search hits
+      response.getHits.forEach { hit =>
+        val sourceAsString = hit.getSourceAsString
+        println(s"Document: $sourceAsString")
+      }
+
+      sleep(10000)
     }
   }
 
