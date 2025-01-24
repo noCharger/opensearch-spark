@@ -7,6 +7,8 @@ package org.apache.spark
 
 import java.sql.{Date, Timestamp}
 
+import org.opensearch.action.search.SearchRequest
+import org.opensearch.client.RequestOptions
 import org.opensearch.flint.OpenSearchSuite
 
 import org.apache.spark.sql.{DataFrame, ExplainSuiteHelper, QueryTest, Row}
@@ -273,6 +275,86 @@ class FlintDataSourceV2ITSuite
         checkDatasetUnorderly(outputDf, 1, 2, 3)
 
       } finally {
+        if (query != null) {
+          query.stop()
+        }
+      }
+    }
+  }
+
+  test("POC - Build streaming read and write to flint") {
+    val indexName = "t0001"
+
+    // Create a memory stream of Int values
+    val inputData = MemoryStream[Int]
+    val streamingDF = inputData.toDF().toDF("aInt")
+
+    // Prepare checkpoint directory
+    val checkpointDir = Utils.createTempDir(namePrefix = "stream.checkpoint").getCanonicalPath
+    var query: StreamingQuery = null
+
+    withIndexName(indexName) {
+      // Define and create the index mapping
+      val mappings =
+        """{
+          |  "properties": {
+          |    "aInt": {
+          |      "type": "integer"
+          |    }
+          |  }
+          |}""".stripMargin
+      index(indexName, oneNodeSetting, mappings, Seq.empty)
+
+      // Register the streaming DataFrame as a temp view
+      streamingDF.createOrReplaceTempView("my_stream_table")
+
+      // Transform data via Spark SQL
+      val transformedStreamDF = spark.sql("""
+        SELECT aInt
+        FROM my_stream_table
+        WHERE aInt > 0
+      """)
+
+      try {
+        // 3. Write out the results to Flint in streaming mode
+        query = transformedStreamDF.writeStream
+          .format("flint")
+          .outputMode("append")
+          .option("checkpointLocation", checkpointDir)
+          .option(s"${DOC_ID_COLUMN_NAME.optionKey}", "aInt")
+          .options(openSearchOptions)
+          .start(indexName)
+
+        // Feed data into the MemoryStream
+        inputData.addData(1, 2, 3)
+
+        // Wait until all data is processed
+        failAfter(streamingTimeout) {
+          query.processAllAvailable()
+        }
+
+        // Read from Flint to verify the data was written
+        val outputDf = spark.read
+          .format("flint")
+          .options(openSearchOptions)
+          .load(indexName)
+          .as[Int]
+
+        // Confirm we got (1, 2, 3) back
+        checkDatasetUnorderly(outputDf, 1, 2, 3)
+
+        val request = new SearchRequest(indexName)
+        val response = openSearchClient.search(request, RequestOptions.DEFAULT)
+        // scalastyle:off println
+        println(response.toString)
+        // Iterate through the search hits
+        response.getHits.forEach { hit =>
+          val sourceAsString = hit.getSourceAsString
+          println(s"Document: $sourceAsString")
+        }
+
+      } finally {
+        // Always stop the query in a finally block
         if (query != null) {
           query.stop()
         }

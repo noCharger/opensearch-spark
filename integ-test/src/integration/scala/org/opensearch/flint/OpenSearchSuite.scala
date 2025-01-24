@@ -30,7 +30,7 @@ trait OpenSearchSuite extends BeforeAndAfterAll {
 
   protected lazy val openSearchHost: String = container.getHost
 
-  protected lazy val openSearchClient = new RestHighLevelClient(
+  lazy val openSearchClient = new RestHighLevelClient(
     RestClient.builder(new HttpHost(openSearchHost, openSearchPort, "http")))
 
   protected lazy val openSearchOptions =
