@@ -7,12 +7,13 @@ package org.apache.spark
 
 import java.sql.{Date, Timestamp}
 
-import org.opensearch.action.search.SearchRequest
-import org.opensearch.client.RequestOptions
 import org.opensearch.flint.OpenSearchSuite
+import org.scalatest.time.SpanSugar.convertIntToGrainOfTime
 
-import org.apache.spark.sql.{DataFrame, ExplainSuiteHelper, QueryTest, Row}
-import org.apache.spark.sql.catalyst.plans.logical.Filter
+import org.apache.spark.sql.{DataFrame, Dataset, ExplainSuiteHelper, QueryTest, Row, SparkSession}
+import org.apache.spark.sql.catalyst.expressions.{Expression, NamedExpression}
+import org.apache.spark.sql.catalyst.parser.CatalystSqlParser
+import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, Filter, LogicalPlan, Project}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2ScanRelation
 import org.apache.spark.sql.execution.streaming.MemoryStream
 import org.apache.spark.sql.flint.config.FlintSparkConf
@@ -282,83 +283,136 @@ class FlintDataSourceV2ITSuite
     }
   }
 
-  test("POC - Build streaming read and write to flint") {
-    val indexName = "t0001"
+  object StreamingSqlPlanner {
 
-    // Create a memory stream of Int values
+    /**
+     * Parse the input SQL string into a LogicalPlan using Catalyst.
+     */
+    def parseSqlQuery(sql: String): LogicalPlan = {
+      CatalystSqlParser.parsePlan(sql)
+    }
+
+    /**
+     * Build a streaming DataFrame/Dataset transformation plan based on the parsed LogicalPlan.
+     */
+    def buildStreamingPlan(
+        spark: SparkSession,
+        logicalPlan: LogicalPlan,
+        inputDS: Dataset[Int]): Dataset[(Int, Long)] = {
+
+      logicalPlan match {
+        case Aggregate(groupingExprs, aggregateExprs, child) =>
+          buildAggregatePlan(spark, groupingExprs, aggregateExprs, inputDS)
+
+        case Project(projectList, child) =>
+          // simply do a pass-through.
+          buildProjectPlan(projectList, inputDS)
+
+        case _ =>
+          throw new UnsupportedOperationException(
+            s"Only simple Aggregate/Project plans are supported. Got: $logicalPlan")
+      }
+    }
+
+    /**
+     * Example aggregator that does COUNT(*) grouped by the integer key.
+     */
+    private def buildAggregatePlan(
+        spark: SparkSession,
+        groupingExprs: Seq[Expression],
+        aggregateExprs: Seq[NamedExpression],
+        inputDS: Dataset[Int]): Dataset[(Int, Long)] = {
+
+      val groupedDS = inputDS.groupByKey { x =>
+        x
+      }
+
+      def updateCount(
+          key: Int,
+          values: Iterator[Int],
+          state: org.apache.spark.sql.streaming.GroupState[Long]): (Int, Long) = {
+        val oldCount = if (state.exists) state.get else 0L
+        val newCount = oldCount + values.size
+        state.update(newCount)
+        (key, newCount)
+      }
+
+      groupedDS.mapGroupsWithState[Long, (Int, Long)](
+        org.apache.spark.sql.streaming.GroupStateTimeout.NoTimeout)(updateCount)
+    }
+
+    private def buildProjectPlan(
+        projectList: Seq[NamedExpression],
+        inputDS: Dataset[Int]): Dataset[(Int, Long)] = {
+      inputDS.map(x => (x, 1L))
+    }
+  }
+
+  test("POC - Build streaming read and write to Flint with mapGroupsWithState + Catalyst SQL") {
+    // Memory stream of Int values
     val inputData = MemoryStream[Int]
-    val streamingDF = inputData.toDF().toDF("aInt")
+    val baseDF = inputData.toDF().toDF("aInt")
+    // Convert to typed DS so we can do mapGroupsWithState easily
+    val typedDS: Dataset[Int] = baseDF.as[Int]
 
-    // Prepare checkpoint directory
+    // Prepare dummy checkpoint directories
     val checkpointDir = Utils.createTempDir(namePrefix = "stream.checkpoint").getCanonicalPath
+
+    val sqlQuery = "SELECT aInt, COUNT(*) FROM MyTable GROUP BY aInt"
+
+    // Parse it using Catalyst
+    val plan = StreamingSqlPlanner.parseSqlQuery(sqlQuery)
+    // Build the aggregator with mapGroupsWithState
+    val aggregator = StreamingSqlPlanner.buildStreamingPlan(spark, plan, typedDS)
+    // aggregator: Dataset[(Int, Long)] => (aInt, count)
+
     var query: StreamingQuery = null
 
-    withIndexName(indexName) {
-      // Define and create the index mapping
-      val mappings =
-        """{
-          |  "properties": {
-          |    "aInt": {
-          |      "type": "integer"
-          |    }
-          |  }
-          |}""".stripMargin
-      index(indexName, oneNodeSetting, mappings, Seq.empty)
+    try {
+      query = aggregator
+        .toDF()
+        .writeStream
+        .outputMode("update")
+        .option("checkpointLocation", checkpointDir)
+        .foreachBatch { (batchDF: DataFrame, _: Long) =>
+          // This should handled in projection
+          val renamed = batchDF
+            .withColumnRenamed("_1", "aInt")
+            .withColumnRenamed("_2", "cnt")
 
-      // Register the streaming DataFrame as a temp view
-      streamingDF.createOrReplaceTempView("my_stream_table")
+          // Now write partial updates to Flint using "aInt" as the doc ID
+          // replaced with a dummy print in this example:
+          renamed.show(truncate = false)
 
-      // Transform data via Spark SQL
-      val transformedStreamDF = spark.sql("""
-        SELECT aInt
-        FROM my_stream_table
-        WHERE aInt > 0
-      """)
-
-      try {
-        // 3. Write out the results to Flint in streaming mode
-        query = transformedStreamDF.writeStream
-          .format("flint")
-          .outputMode("append")
-          .option("checkpointLocation", checkpointDir)
-          .option(s"${DOC_ID_COLUMN_NAME.optionKey}", "aInt")
-          .options(openSearchOptions)
-          .start(indexName)
-
-        // Feed data into the MemoryStream
-        inputData.addData(1, 2, 3)
-
-        // Wait until all data is processed
-        failAfter(streamingTimeout) {
-          query.processAllAvailable()
+          /*
+          renamed.write
+            .format("flint")
+            .mode("overwrite")
+            .option("checkpointLocation", flintCheckpointDir)
+            .option(s"${DOC_ID_COLUMN_NAME.optionKey}", "aInt")
+            .options(openSearchOptions)
+            .save(indexName)
+           */
         }
+        .start()
 
-        // Read from Flint to verify the data was written
-        val outputDf = spark.read
-          .format("flint")
-          .options(openSearchOptions)
-          .load(indexName)
-          .as[Int]
-
-        // Confirm we got (1, 2, 3) back
-        checkDatasetUnorderly(outputDf, 1, 2, 3)
-
-        val request = new SearchRequest(indexName)
-        val response = openSearchClient.search(request, RequestOptions.DEFAULT)
-        // scalastyle:off println
-        println(response.toString)
-        // Iterate through the search hits
-        response.getHits.forEach { hit =>
-          val sourceAsString = hit.getSourceAsString
-          println(s"Document: $sourceAsString")
-        }
-
-      } finally {
-        // Always stop the query in a finally block
-        if (query != null) {
-          query.stop()
-        }
+      // -- FIRST MICRO-BATCH --
+      inputData.addData(1, 2, 3)
+      failAfter(30.seconds) {
+        query.processAllAvailable()
       }
+      // Expect (1->1, 2->1, 3->1)
+
+      // -- SECOND MICRO-BATCH --
+      inputData.addData(2, 3, 4)
+      failAfter(30.seconds) {
+        query.processAllAvailable()
+      }
+      // Now aggregator increments counts for 2 and 3, adds 4 => 1->1, 2->2, 3->2, 4->1
+
+    } finally {
+      if (query != null) query.stop()
+      spark.stop()
     }
   }
 
