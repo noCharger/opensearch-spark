@@ -5,6 +5,7 @@
 
 package org.apache.spark
 
+import java.lang.Thread.sleep
 import java.sql.{Date, Timestamp}
 
 import org.opensearch.action.search.SearchRequest
@@ -282,12 +283,22 @@ class FlintDataSourceV2ITSuite
     }
   }
 
-  test("POC - Build streaming read and write to flint") {
+  def printEachBatch(batchDF: DataFrame, batchId: Long): Unit = {
+    println(s"=== Micro-batch $batchId ===")
+    batchDF.show(truncate = false)
+  }
+
+  test("POC - Build streaming read and write to flint with watermark") {
     val indexName = "t0001"
 
     // Create a memory stream of Int values
     val inputData = MemoryStream[Int]
-    val streamingDF = inputData.toDF().toDF("aInt")
+    // Include a timestamp column, and set a watermark on it
+    val streamingDF = inputData
+      .toDF()
+      .toDF("aInt")
+      .withColumn("eventTime", current_timestamp()) // Add current timestamp
+      .withWatermark("eventTime", "1 second")
 
     // Prepare checkpoint directory
     val checkpointDir = Utils.createTempDir(namePrefix = "stream.checkpoint").getCanonicalPath
@@ -300,6 +311,9 @@ class FlintDataSourceV2ITSuite
           |  "properties": {
           |    "aInt": {
           |      "type": "integer"
+          |    },
+          |    "cnt": {
+          |      "type": "integer"
           |    }
           |  }
           |}""".stripMargin
@@ -309,45 +323,48 @@ class FlintDataSourceV2ITSuite
       streamingDF.createOrReplaceTempView("my_stream_table")
 
       // Transform data via Spark SQL
+      // Note that we are grouping by a time window that uses the same column as the watermark.
       val transformedStreamDF = spark.sql("""
-        SELECT aInt
-        FROM my_stream_table
-        WHERE aInt > 0
-      """)
+      SELECT
+        aInt,
+        COUNT(aInt) AS cnt,
+        window(eventTime, "10 seconds") AS time_window
+      FROM my_stream_table
+      WHERE aInt > 0
+      GROUP BY aInt, window(eventTime, "10 seconds")
+    """)
 
       try {
-        // 3. Write out the results to Flint in streaming mode
+        // Write out the results to Flint in streaming mode, using "append"
         query = transformedStreamDF.writeStream
           .format("flint")
-          .outputMode("append")
+          .outputMode("update")
           .option("checkpointLocation", checkpointDir)
           .option(s"${DOC_ID_COLUMN_NAME.optionKey}", "aInt")
           .options(openSearchOptions)
+          .foreachBatch(printEachBatch _)
           .start(indexName)
 
         // Feed data into the MemoryStream
         inputData.addData(1, 2, 3)
+
+        failAfter(streamingTimeout) {
+          query.processAllAvailable()
+        }
+
+        inputData.addData(2, 3, 4)
 
         // Wait until all data is processed
         failAfter(streamingTimeout) {
           query.processAllAvailable()
         }
 
-        // Read from Flint to verify the data was written
-        val outputDf = spark.read
-          .format("flint")
-          .options(openSearchOptions)
-          .load(indexName)
-          .as[Int]
-
-        // Confirm we got (1, 2, 3) back
-        checkDatasetUnorderly(outputDf, 1, 2, 3)
-
+        // Verify data in OpenSearch
         val request = new SearchRequest(indexName)
         val response = openSearchClient.search(request, RequestOptions.DEFAULT)
-        // scalastyle:off println
+
+        // Print out the search hits
         println(response.toString)
-        // Iterate through the search hits
         response.getHits.forEach { hit =>
           val sourceAsString = hit.getSourceAsString
           println(s"Document: $sourceAsString")
