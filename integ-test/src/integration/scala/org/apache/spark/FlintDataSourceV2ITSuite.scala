@@ -10,10 +10,9 @@ import java.sql.{Date, Timestamp}
 import org.opensearch.flint.OpenSearchSuite
 import org.scalatest.time.SpanSugar.convertIntToGrainOfTime
 
-import org.apache.spark.sql.{DataFrame, Dataset, ExplainSuiteHelper, QueryTest, Row, SparkSession}
-import org.apache.spark.sql.catalyst.expressions.{Expression, NamedExpression}
+import org.apache.spark.sql.{DataFrame, ExplainSuiteHelper, QueryTest, Row}
+import org.apache.spark.sql.catalyst.analysis.UnresolvedAttribute
 import org.apache.spark.sql.catalyst.parser.CatalystSqlParser
-import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, Filter, LogicalPlan, Project}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2ScanRelation
 import org.apache.spark.sql.execution.streaming.MemoryStream
 import org.apache.spark.sql.flint.config.FlintSparkConf
@@ -283,49 +282,49 @@ class FlintDataSourceV2ITSuite
     }
   }
 
+  import org.apache.spark.sql.{Dataset, SparkSession}
+  import org.apache.spark.sql.catalyst.expressions._
+  import org.apache.spark.sql.catalyst.plans.logical._
+  import org.apache.spark.sql.functions._
+
   object StreamingSqlPlanner {
 
-    /**
-     * Parse the input SQL string into a LogicalPlan using Catalyst.
-     */
     def parseSqlQuery(sql: String): LogicalPlan = {
       CatalystSqlParser.parsePlan(sql)
     }
 
-    /**
-     * Build a streaming DataFrame/Dataset transformation plan based on the parsed LogicalPlan.
-     */
     def buildStreamingPlan(
         spark: SparkSession,
         logicalPlan: LogicalPlan,
-        inputDS: Dataset[Int]): Dataset[(Int, Long)] = {
+        inputDS: Dataset[Int]): (Dataset[(Int, Long)], Option[Seq[SortOrder]]) = {
 
-      logicalPlan match {
-        case Aggregate(groupingExprs, aggregateExprs, child) =>
-          buildAggregatePlan(spark, groupingExprs, aggregateExprs, inputDS)
+      def recurse(plan: LogicalPlan): (Dataset[(Int, Long)], Option[Seq[SortOrder]]) =
+        plan match {
+          case Sort(order, _, child) =>
+            // Remember the sort order, but don't apply it here
+            val (childDS, _) = recurse(child)
+            (childDS, Some(order))
 
-        case Project(projectList, child) =>
-          // simply do a pass-through.
-          buildProjectPlan(projectList, inputDS)
+          case Aggregate(groupingExprs, aggregateExprs, child) =>
+            (buildAggregatePlan(spark, groupingExprs, aggregateExprs, inputDS), None)
 
-        case _ =>
-          throw new UnsupportedOperationException(
-            s"Only simple Aggregate/Project plans are supported. Got: $logicalPlan")
-      }
+          case Project(projectList, child) =>
+            (buildProjectPlan(projectList, inputDS), None)
+
+          case _ =>
+            throw new UnsupportedOperationException(s"Unsupported operation in plan: $plan")
+        }
+
+      recurse(logicalPlan)
     }
 
-    /**
-     * Example aggregator that does COUNT(*) grouped by the integer key.
-     */
     private def buildAggregatePlan(
         spark: SparkSession,
         groupingExprs: Seq[Expression],
         aggregateExprs: Seq[NamedExpression],
         inputDS: Dataset[Int]): Dataset[(Int, Long)] = {
 
-      val groupedDS = inputDS.groupByKey { x =>
-        x
-      }
+      val groupedDS = inputDS.groupByKey { x => x }
 
       def updateCount(
           key: Int,
@@ -358,12 +357,12 @@ class FlintDataSourceV2ITSuite
     // Prepare dummy checkpoint directories
     val checkpointDir = Utils.createTempDir(namePrefix = "stream.checkpoint").getCanonicalPath
 
-    val sqlQuery = "SELECT aInt, COUNT(*) FROM MyTable GROUP BY aInt"
+    val sqlQuery = "SELECT aInt, COUNT(*) as cnt FROM MyTable GROUP BY aInt ORDER BY cnt DESC "
 
     // Parse it using Catalyst
     val plan = StreamingSqlPlanner.parseSqlQuery(sqlQuery)
     // Build the aggregator with mapGroupsWithState
-    val aggregator = StreamingSqlPlanner.buildStreamingPlan(spark, plan, typedDS)
+    val (aggregator, sortOrderOpt) = StreamingSqlPlanner.buildStreamingPlan(spark, plan, typedDS)
     // aggregator: Dataset[(Int, Long)] => (aInt, count)
 
     var query: StreamingQuery = null
@@ -376,9 +375,23 @@ class FlintDataSourceV2ITSuite
         .option("checkpointLocation", checkpointDir)
         .foreachBatch { (batchDF: DataFrame, _: Long) =>
           // This should handled in projection
-          val renamed = batchDF
+          var renamed = batchDF
             .withColumnRenamed("_1", "aInt")
             .withColumnRenamed("_2", "cnt")
+
+          sortOrderOpt.foreach { sortOrder =>
+            val sortColumns = sortOrder.map { so =>
+              val colName = so.child match {
+                case UnresolvedAttribute(nameParts) => nameParts.last
+                case AttributeReference(name, _, _, _) => name
+                case _ =>
+                  throw new UnsupportedOperationException(
+                    s"Unsupported sort expression: ${so.child}")
+              }
+              if (so.direction == Ascending) col(colName).asc else col(colName).desc
+            }
+            renamed = renamed.sort(sortColumns: _*)
+          }
 
           // Now write partial updates to Flint using "aInt" as the doc ID
           // replaced with a dummy print in this example:
