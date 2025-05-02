@@ -52,7 +52,7 @@ trait Table extends Serializable {
    *   OpenSearch DSL query.
    * @return
    */
-  def createReader(query: String): FlintReader
+  def createReader(query: String, sortClauses: String = "", limit: Int = -1): FlintReader
 
   /**
    * OpenSearch Table schema

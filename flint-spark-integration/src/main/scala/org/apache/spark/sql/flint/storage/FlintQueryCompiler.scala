@@ -7,10 +7,11 @@ package org.apache.spark.sql.flint.storage
 
 import scala.io.Source
 
+import org.apache.spark.internal.Logging
 import org.apache.spark.sql.catalyst.expressions.Literal
 import org.apache.spark.sql.catalyst.util.{DateTimeUtils, TimestampFormatter}
 import org.apache.spark.sql.connector.catalog.CatalogV2Implicits.parseColumnPath
-import org.apache.spark.sql.connector.expressions.{Expression, FieldReference, LiteralValue}
+import org.apache.spark.sql.connector.expressions.{Expression, FieldReference, LiteralValue, SortDirection, SortOrder}
 import org.apache.spark.sql.connector.expressions.filter.{And, Predicate}
 import org.apache.spark.sql.flint.datatype.FlintDataType.STRICT_DATE_OPTIONAL_TIME_FORMATTER_WITH_NANOS
 import org.apache.spark.sql.flint.datatype.FlintMetadataExtensions.MetadataExtension
@@ -20,7 +21,7 @@ import org.apache.spark.sql.types._
 /**
  * Todo. find the right package.
  */
-case class FlintQueryCompiler(schema: StructType) {
+case class FlintQueryCompiler(schema: StructType) extends Logging {
 
   /**
    * Using AND to concat predicates. Todo. If spark spark.sql.ansi.enabled = true, more expression
@@ -31,6 +32,35 @@ case class FlintQueryCompiler(schema: StructType) {
       return ""
     }
     compile(predicates.reduce(new And(_, _)))
+  }
+
+  def compileSortOrders(sortOrders: Array[SortOrder]): String = {
+    if (sortOrders.isEmpty) {
+      logInfo("No sort orders provided")
+      return ""
+    }
+
+//    logInfo(s"Processing sort orders: ${sortOrders.mkString(", ")}")
+
+    val sortClauses = sortOrders.map { sortOrder =>
+      val field = sortOrder.expression() match {
+        case f: FieldReference =>
+          val originalField = f.toString()
+          val processedField = originalField.replaceAll("`", "")
+//          logInfo(s"Converting field reference from '$originalField' to '$processedField'")
+          processedField
+        case other =>
+          logWarning(s"Unsupported sort expression: $other")
+          return "" // Unsupported sort expression
+      }
+
+      val direction = if (sortOrder.direction() == SortDirection.ASCENDING) "asc" else "desc"
+      s"""{"$field": {"order": "$direction", "missing": "_last"}}""" // Added missing parameter
+    }
+
+    val result = sortClauses.mkString("[", ",", "]")
+//    logInfo(s"Final sort clauses: $result")
+    result
   }
 
   /**

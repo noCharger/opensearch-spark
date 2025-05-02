@@ -5,18 +5,22 @@
 
 package org.opensearch.flint.core.table
 
-import org.json4s.{Formats, NoTypeHints}
-import org.json4s.JsonAST.JString
+import org.json4s.{DefaultFormats, Formats, NoTypeHints}
+import org.json4s.JsonAST.{JArray, JObject, JString}
 import org.json4s.jackson.JsonMethods
 import org.json4s.native.Serialization
 import org.opensearch.action.search.SearchRequest
 import org.opensearch.client.opensearch.indices.IndicesStatsRequest
 import org.opensearch.client.opensearch.indices.stats.IndicesStats
+import org.opensearch.common.Strings
+import org.opensearch.common.xcontent.{LoggingDeprecationHandler, XContentFactory, XContentType}
 import org.opensearch.flint.core._
 import org.opensearch.flint.core.storage.{FlintReader, OpenSearchClientUtils, OpenSearchSearchAfterQueryReader}
 import org.opensearch.flint.core.table.OpenSearchIndexTable.maxSplitSizeBytes
 import org.opensearch.search.builder.SearchSourceBuilder
-import org.opensearch.search.sort.SortOrder
+import org.opensearch.search.sort.{FieldSortBuilder, SortBuilder}
+
+import org.apache.spark.internal.Logging
 
 /**
  * Represents an OpenSearch index.
@@ -26,7 +30,7 @@ import org.opensearch.search.sort.SortOrder
  * @param option
  *   FlintOptions containing configuration options for the Flint client.
  */
-class OpenSearchIndexTable(metaData: MetaData, option: FlintOptions) extends Table {
+class OpenSearchIndexTable(metaData: MetaData, option: FlintOptions) extends Table with Logging {
   @transient implicit val formats: Formats = Serialization.formats(NoTypeHints)
 
   /**
@@ -99,17 +103,69 @@ class OpenSearchIndexTable(metaData: MetaData, option: FlintOptions) extends Tab
    * @return
    *   A FlintReader instance.
    */
-  override def createReader(query: String): FlintReader = {
+  override def createReader(query: String, sortClauses: String, limit: Int): FlintReader = {
+
+//    logInfo("sortClauses: " + sortClauses)
+
+    val sourceBuilder = new SearchSourceBuilder()
+      .query(Table.queryBuilder(query))
+      .size(if (limit > 0) limit else pageSize)
+
+    // Add custom sort if provided, otherwise use default sorts
+    if (!Strings.isNullOrEmpty(sortClauses)) {
+      try {
+        implicit val formats: DefaultFormats.type = DefaultFormats
+
+        JsonMethods.parse(sortClauses) match {
+          case JArray(sortOrders) =>
+            sortOrders.foreach {
+              case obj: JObject =>
+                // Each sort object should have one field as key
+                obj.obj.headOption.foreach { case (fieldName, details) =>
+                  val order = (details \ "order") match {
+                    case JString("asc") => org.opensearch.search.sort.SortOrder.ASC
+                    case _ => org.opensearch.search.sort.SortOrder.DESC
+                  }
+
+                  val fieldSort = new FieldSortBuilder(fieldName).order(order)
+
+                  // Add missing parameter if present
+                  (details \ "missing").toOption.foreach {
+                    case JString(missing) => fieldSort.missing(missing)
+                    case _ => // ignore other types
+                  }
+
+                  sourceBuilder.sort(fieldSort)
+                }
+              case _ => // ignore other types
+            }
+          case _ =>
+            logWarning("Invalid sort clauses format, falling back to default sort")
+            addDefaultSort(sourceBuilder)
+        }
+      } catch {
+        case e: Exception =>
+          logError("Error parsing sort clauses", e)
+          addDefaultSort(sourceBuilder)
+      }
+    } else {
+      addDefaultSort(sourceBuilder)
+    }
+
+//    logInfo("Source Builder: " + sourceBuilder.toString)
+
     new OpenSearchSearchAfterQueryReader(
       OpenSearchClientUtils.createClient(option),
       new SearchRequest()
         .indices(name)
-        .source(
-          new SearchSourceBuilder()
-            .query(Table.queryBuilder(query))
-            .size((pageSize))
-            .sort("_doc", SortOrder.ASC)
-            .sort("_id", SortOrder.ASC)))
+        .source(sourceBuilder))
+  }
+
+  private def addDefaultSort(sourceBuilder: SearchSourceBuilder): Unit = {
+    sourceBuilder.sort(
+      new FieldSortBuilder("_doc").order(org.opensearch.search.sort.SortOrder.ASC))
+    sourceBuilder.sort(
+      new FieldSortBuilder("_id").order(org.opensearch.search.sort.SortOrder.ASC))
   }
 
   /**

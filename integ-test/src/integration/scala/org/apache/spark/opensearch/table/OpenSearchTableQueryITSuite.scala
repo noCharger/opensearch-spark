@@ -137,6 +137,91 @@ class OpenSearchTableQueryITSuite
     }
   }
 
+  test("Query with sort and limit pushdown on timestamp") {
+    val indexName = "t0001"
+    val table = s"${catalogName}.default.$indexName"
+
+    spark.conf.set("spark.sql.session.timeZone", "UTC")
+
+    withIndexName(indexName) {
+      // Create an index with multiple documents including timestamp
+      createIndex(
+        indexName,
+        """
+          |{
+          |  "properties": {
+          |    "id": { "type": "integer" },
+          |    "@timestamp": {
+          |        "type": "date",
+          |        "format": "strict_date_optional_time||epoch_millis"
+          |    },
+          |    "name": { "type": "keyword" }
+          |  }
+          |}
+          |""".stripMargin,
+        """{"id": 1, "@timestamp": "2024-01-01T00:00:00Z", "name": "a"}""",
+        """{"id": 2, "@timestamp": "2024-01-02T00:00:00Z", "name": "b"}""",
+        """{"id": 3, "@timestamp": "2024-01-03T00:00:00Z", "name": "c"}""",
+        """{"id": 4, "@timestamp": "2024-01-04T00:00:00Z", "name": "d"}""",
+        """{"id": 5, "@timestamp": "2024-01-05T00:00:00Z", "name": "e"}""")
+
+      // Test case 1: Sort by timestamp with limit
+      var df = spark.sql(s"""
+           |SELECT id, `@timestamp`, name
+           |FROM $table
+           |ORDER BY `@timestamp` DESC
+           |LIMIT 3
+           |""".stripMargin)
+
+      // Verify sort and limit are pushed down
+      checkPushedInfo(df, "Limit 3", "@timestamp DESC")
+      checkAnswer(
+        df,
+        Seq(
+          Row(5, java.sql.Timestamp.valueOf("2024-01-05 00:00:00"), "e"),
+          Row(4, java.sql.Timestamp.valueOf("2024-01-04 00:00:00"), "d"),
+          Row(3, java.sql.Timestamp.valueOf("2024-01-03 00:00:00"), "c")))
+
+      // Test case 2: Sort by timestamp and name
+      df = spark.sql(s"""
+           |SELECT id, `@timestamp`, name
+           |FROM $table
+           |WHERE `@timestamp` > '2024-01-02T00:00:00Z'
+           |ORDER BY name ASC, `@timestamp` DESC
+           |""".stripMargin)
+
+      // Verify filter and sort are pushed down
+      checkPushedInfo(df, "@timestamp > '2024-01-02T00:00:00Z'", "name ASC", "@timestamp DESC")
+      checkAnswer(
+        df,
+        Seq(
+          Row(3, java.sql.Timestamp.valueOf("2024-01-03 00:00:00"), "c"),
+          Row(4, java.sql.Timestamp.valueOf("2024-01-04 00:00:00"), "d"),
+          Row(5, java.sql.Timestamp.valueOf("2024-01-05 00:00:00"), "e")))
+
+      // Test case 3: Sort with timestamp filter and limit
+      df = spark.sql(s"""
+           |SELECT id, `@timestamp`, name
+           |FROM $table
+           |WHERE `@timestamp` > '2024-01-01T00:00:00Z'
+           |ORDER BY `@timestamp` ASC
+           |LIMIT 2
+           |""".stripMargin)
+
+      // Verify filter, sort and limit are pushed down
+      checkPushedInfo(df, "@timestamp > '2024-01-01T00:00:00Z'", "@timestamp ASC", "Limit 2")
+      checkAnswer(
+        df,
+        Seq(
+          Row(2, java.sql.Timestamp.valueOf("2024-01-02 00:00:00"), "b"),
+          Row(3, java.sql.Timestamp.valueOf("2024-01-03 00:00:00"), "c")))
+    }
+  }
+
+  def createIndex(indexName: String, mappings: String, docs: String*): Unit = {
+    index(indexName, oneNodeSetting, mappings, docs)
+  }
+
   def checkPushedInfo(df: DataFrame, expectedPlanFragment: String*): Unit = {
     df.queryExecution.optimizedPlan.collect { case _: DataSourceV2ScanRelation =>
       checkKeywordsExistsInExplain(df, expectedPlanFragment: _*)
