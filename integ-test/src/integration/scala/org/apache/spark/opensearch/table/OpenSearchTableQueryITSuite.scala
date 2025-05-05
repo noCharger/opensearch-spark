@@ -136,7 +136,6 @@ class OpenSearchTableQueryITSuite
           Row(5, GeoPoint(40.12, -71.34))))
     }
   }
-
   def checkPushedInfo(df: DataFrame, expectedPlanFragment: String*): Unit = {
     df.queryExecution.optimizedPlan.collect { case _: DataSourceV2ScanRelation =>
       checkKeywordsExistsInExplain(df, expectedPlanFragment: _*)

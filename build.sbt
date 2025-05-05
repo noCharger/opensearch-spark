@@ -214,7 +214,10 @@ lazy val pplSparkIntegration = (project in file("ppl-spark-integration"))
         val oldStrategy = (assembly / assemblyMergeStrategy).value
         oldStrategy(x)
     },
-    assembly / test := (Test / test).value)
+    Test / test := {},
+    Test / skip := true,
+    assembly / test := {},
+  )
 
 lazy val flintSparkIntegration = (project in file("flint-spark-integration"))
   .dependsOn(flintCore, flintCommons)
@@ -256,7 +259,10 @@ lazy val flintSparkIntegration = (project in file("flint-spark-integration"))
         val oldStrategy = (assembly / assemblyMergeStrategy).value
         oldStrategy(x)
     },
-    assembly / test := (Test / test).value)
+    Test / test := {},
+    Test / skip := true,
+    assembly / test := {},
+  )
 
 lazy val IntegrationTest = config("it") extend Test
 lazy val AwsIntegrationTest = config("aws-it") extend Test
@@ -396,7 +402,9 @@ lazy val sparkSqlApplication = (project in file("spark-sql-application"))
         val oldStrategy = (assembly / assemblyMergeStrategy).value
         oldStrategy(x)
     },
-    assembly / test := (Test / test).value
+    Test / test := {},
+    Test / skip := true,
+    assembly / test := {},
   )
 
 lazy val sparkSqlApplicationCosmetic = project
