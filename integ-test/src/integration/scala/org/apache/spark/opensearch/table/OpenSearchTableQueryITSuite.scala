@@ -142,6 +142,7 @@ class OpenSearchTableQueryITSuite
     val table = s"${catalogName}.default.$indexName"
 
     spark.conf.set("spark.sql.session.timeZone", "UTC")
+    spark.conf.set("spark.datasource.flint.read.scroll_size", 10000)
 
     withIndexName(indexName) {
       // Create an index with multiple documents including timestamp
