@@ -24,7 +24,7 @@ import java.util.stream.Collectors;
 public class OpenSearchSearchAfterQueryReader extends OpenSearchReader {
 
   private static final Logger LOG =
-      Logger.getLogger(OpenSearchSearchAfterQueryReader.class.getName());
+          Logger.getLogger(OpenSearchSearchAfterQueryReader.class.getName());
 
   /**
    * current search_after value, init value is null
@@ -39,24 +39,48 @@ public class OpenSearchSearchAfterQueryReader extends OpenSearchReader {
    */
   Optional<SearchResponse> search(SearchRequest request) {
     try {
-      Optional<SearchResponse> response;
+      // Log initial query details
+      LOG.info(String.format("Executing search_after query on index [%s] with query: %s",
+              String.join(",", request.indices()),
+              request.source().toString()));
+
       if (search_after != null) {
+        LOG.info(String.format("Using search_after values: [%s]",
+                Arrays.stream(search_after)
+                        .map(Object::toString)
+                        .collect(Collectors.joining(","))));
         request.source().searchAfter(search_after);
       }
-      response = Optional.of(client.search(request, RequestOptions.DEFAULT));
+
+      long startTime = System.currentTimeMillis();
+
+      Optional<SearchResponse> response = Optional.of(client.search(request, RequestOptions.DEFAULT));
+
+      long endTime = System.currentTimeMillis();
+      long latency = endTime - startTime;
+
       int length = response.get().getHits().getHits().length;
+      LOG.info(String.format("Search completed on index [%s] in %d ms, returned %d hits",
+              String.join(",", request.indices()), latency, length));
+
       if (length == 0) {
+        LOG.info("No more results found, resetting search_after");
         search_after = null;
         return Optional.empty();
       }
+
       // update search_after
       search_after = response.get().getHits().getAt(length - 1).getSortValues();
-      LOG.info("update search_after " + Arrays.stream(search_after)
-          .map(Object::toString)
-          .collect(Collectors.joining(",")));
+      LOG.info(String.format("Updated search_after to: [%s]",
+              Arrays.stream(search_after)
+                      .map(Object::toString)
+                      .collect(Collectors.joining(","))));
+
       return response;
     } catch (Exception e) {
-      LOG.warning(e.getMessage());
+      LOG.warning(String.format("Search failed on index [%s]: %s",
+              String.join(",", request.indices()),
+              e.getMessage()));
       throw new RuntimeException(e);
     }
   }

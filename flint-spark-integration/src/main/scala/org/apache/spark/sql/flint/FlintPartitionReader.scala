@@ -8,6 +8,7 @@ package org.apache.spark.sql.flint
 import com.fasterxml.jackson.core.{JsonFactory, JsonParser}
 import org.opensearch.flint.core.storage.FlintReader
 
+import org.apache.spark.internal.Logging
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.json.{CreateJacksonParser, JSONOptionsInRead}
 import org.apache.spark.sql.catalyst.util.{CaseInsensitiveMap, FailureSafeParser}
@@ -26,14 +27,20 @@ import org.apache.spark.unsafe.types.UTF8String
  *   schema
  */
 class FlintPartitionReader(reader: FlintReader, schema: StructType, options: FlintSparkConf)
-    extends PartitionReader[InternalRow] {
+    extends PartitionReader[InternalRow]
+    with Logging {
+
+  private val startTime: Long = System.currentTimeMillis()
+  private var recordsRead: Long = 0
 
   lazy val parser = new FlintJacksonParser(
     schema,
     new JSONOptionsInRead(CaseInsensitiveMap(DATE_FORMAT_PARAMETERS), options.timeZone, ""),
     allowArrayAsStructs = true)
+
   lazy val stringParser: (JsonFactory, String) => JsonParser =
     CreateJacksonParser.string(_: JsonFactory, _: String)
+
   lazy val safeParser = new FailureSafeParser[String](
     input => parser.parse(input, stringParser, UTF8String.fromString),
     parser.options.parseMode,
@@ -42,16 +49,17 @@ class FlintPartitionReader(reader: FlintReader, schema: StructType, options: Fli
 
   var rows: Iterator[InternalRow] = Iterator.empty
 
-  /**
-   * Todo. consider multiple-line json.
-   * @return
-   */
   override def next: Boolean = {
     if (rows.hasNext) {
       true
     } else if (reader.hasNext) {
       rows = safeParser.parse(reader.next())
-      rows.hasNext
+      if (rows.hasNext) {
+        recordsRead += 1
+        true
+      } else {
+        false
+      }
     } else {
       false
     }
@@ -62,6 +70,9 @@ class FlintPartitionReader(reader: FlintReader, schema: StructType, options: Fli
   }
 
   override def close(): Unit = {
+    val totalTime = System.currentTimeMillis() - startTime
+    logInfo(
+      f"FlintPartitionReader processed $recordsRead records in ${totalTime / 1000.0}%.3f seconds")
     reader.close()
   }
 }
