@@ -47,22 +47,45 @@ public class OpenSearchCluster {
    * @return list of OpenSearch table metadata
    */
   public static List<MetaData> getAllOpenSearchTableMetadata(FlintOptions options, String... indexNamePattern) {
+    long startTime = System.currentTimeMillis();
     LOG.info("Fetching all OpenSearch table metadata for pattern " + String.join(",", indexNamePattern));
+
     String[] indexNames =
-        Arrays.stream(indexNamePattern).map(OpenSearchClientUtils::sanitizeIndexName).toArray(String[]::new);
+            Arrays.stream(indexNamePattern).map(OpenSearchClientUtils::sanitizeIndexName).toArray(String[]::new);
+
     try (IRestHighLevelClient client = OpenSearchClientUtils.createClient(options)) {
       GetIndexRequest request = new GetIndexRequest(indexNames);
-      GetIndexResponse response = client.getIndex(request, RequestOptions.DEFAULT);
 
-      return Arrays.stream(response.getIndices())
-          .map(index -> new MetaData(
-              index,
-              response.getMappings().get(index).source().string(),
-              response.getSettings().get(index).toString()))
-          .collect(Collectors.toList());
+      long queryStartTime = System.currentTimeMillis();
+      GetIndexResponse response = client.getIndex(request, RequestOptions.DEFAULT);
+      long queryEndTime = System.currentTimeMillis();
+
+      List<MetaData> result = Arrays.stream(response.getIndices())
+              .map(index -> new MetaData(
+                      index,
+                      response.getMappings().get(index).source().string(),
+                      response.getSettings().get(index).toString()))
+              .collect(Collectors.toList());
+
+      long endTime = System.currentTimeMillis();
+      LOG.info(String.format("Fetched metadata for %d indices matching [%s] in %.3f seconds " +
+                      "(OpenSearch query: %.3f seconds, Processing: %.3f seconds)",
+              result.size(),
+              String.join(",", indexNamePattern),
+              (endTime - startTime) / 1000.0,
+              (queryEndTime - queryStartTime) / 1000.0,
+              (endTime - queryEndTime) / 1000.0));
+
+      return result;
     } catch (Exception e) {
+      long errorTime = System.currentTimeMillis();
+      LOG.severe(String.format("Failed to get OpenSearch table metadata for [%s] after %.3f seconds: %s",
+              String.join(",", indexNames),
+              (errorTime - startTime) / 1000.0,
+              e.getMessage()));
+
       throw new IllegalStateException("Failed to get OpenSearch table metadata for " +
-          String.join(",", indexNames), e);
+              String.join(",", indexNames), e);
     }
   }
 }

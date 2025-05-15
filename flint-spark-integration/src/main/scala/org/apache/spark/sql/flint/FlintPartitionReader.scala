@@ -30,8 +30,9 @@ class FlintPartitionReader(reader: FlintReader, schema: StructType, options: Fli
     extends PartitionReader[InternalRow]
     with Logging {
 
-  private val startTime: Long = System.currentTimeMillis()
   private var recordsRead: Long = 0
+  private var fetchTimeMs: Long = 0
+  private var parseTimeMs: Long = 0
 
   lazy val parser = new FlintJacksonParser(
     schema,
@@ -53,9 +54,22 @@ class FlintPartitionReader(reader: FlintReader, schema: StructType, options: Fli
     if (rows.hasNext) {
       true
     } else if (reader.hasNext) {
-      rows = safeParser.parse(reader.next())
+      // Measure fetch time
+      val fetchStart = System.currentTimeMillis()
+      val jsonString = reader.next()
+      fetchTimeMs += System.currentTimeMillis() - fetchStart
+
+      // Measure parse time
+      val parseStart = System.currentTimeMillis()
+      rows = safeParser.parse(jsonString)
+      parseTimeMs += System.currentTimeMillis() - parseStart
+
       if (rows.hasNext) {
         recordsRead += 1
+        if (recordsRead % 1000 == 0) {
+          logInfo(
+            f"Progress: processed $recordsRead records (fetch: ${fetchTimeMs / 1000.0}%.3fs, parse: ${parseTimeMs / 1000.0}%.3fs)")
+        }
         true
       } else {
         false
@@ -70,9 +84,11 @@ class FlintPartitionReader(reader: FlintReader, schema: StructType, options: Fli
   }
 
   override def close(): Unit = {
-    val totalTime = System.currentTimeMillis() - startTime
     logInfo(
-      f"FlintPartitionReader processed $recordsRead records in ${totalTime / 1000.0}%.3f seconds")
+      f"FlintPartitionReader completed: $recordsRead records processed" +
+        f" (fetch: ${fetchTimeMs / 1000.0}%.3fs, parse: ${parseTimeMs / 1000.0}%.3fs," +
+        f" avg fetch: ${fetchTimeMs.toDouble / recordsRead}%.3fms/record," +
+        f" avg parse: ${parseTimeMs.toDouble / recordsRead}%.3fms/record)")
     reader.close()
   }
 }

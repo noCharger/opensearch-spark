@@ -11,6 +11,8 @@ import org.opensearch.flint.core.storage.{FlintReader, OpenSearchClientUtils, Op
 import org.opensearch.search.builder.SearchSourceBuilder
 import org.opensearch.search.sort.SortOrder
 
+import org.apache.spark.internal.Logging
+
 /**
  * Represents an OpenSearch index shard.
  *
@@ -22,13 +24,15 @@ import org.opensearch.search.sort.SortOrder
  *   Shard Id.
  */
 class OpenSearchIndexShardTable(metaData: MetaData, option: FlintOptions, shardId: Int)
-    extends OpenSearchIndexTable(metaData, option) {
+    extends OpenSearchIndexTable(metaData, option)
+    with Logging {
 
   override def slice(): Seq[Table] = {
     throw new UnsupportedOperationException("Can't slice OpenSearchIndexShardTable")
   }
 
   override def createReader(query: String): FlintReader = {
+    logInfo("OpenSearchIndexShardTable invoked")
     new OpenSearchSearchAfterQueryReader(
       OpenSearchClientUtils.createClient(option),
       new SearchRequest()
@@ -36,8 +40,8 @@ class OpenSearchIndexShardTable(metaData: MetaData, option: FlintOptions, shardI
         .source(
           new SearchSourceBuilder()
             .query(Table.queryBuilder(query))
-            .size(pageSize)
-            .sort("_doc", SortOrder.ASC))
+            .size(pageSize))
+        //  remove .sort("_doc", SortOrder.ASC)) for testing only
         .preference(s"_shards:$shardId"))
   }
 }

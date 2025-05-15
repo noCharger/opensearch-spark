@@ -44,16 +44,32 @@ class OpenSearchCatalog extends CatalogPlugin with TableCatalog with Logging {
   }
 
   override def loadTable(ident: Identifier): Table = {
+    val startTime = System.currentTimeMillis()
     logInfo(s"Loading table ${ident.name()}")
-    if (!ident.namespace().exists(n => OpenSearchCatalog.isDefaultNamespace(n))) {
-      throw new NoSuchTableException(ident.namespace().mkString("."), ident.name())
+
+    try {
+      if (!ident.namespace().exists(n => OpenSearchCatalog.isDefaultNamespace(n))) {
+        throw new NoSuchTableException(ident.namespace().mkString("."), ident.name())
+      }
+
+      val conf = new java.util.HashMap[String, String](
+        removePrefixFromMap(options.asCaseSensitiveMap(), OPENSEARCH_PREFIX))
+      conf.put("path", ident.name())
+
+      val table = new FlintReadOnlyTable(conf, Option.empty)
+
+      val endTime = System.currentTimeMillis()
+      logInfo(f"Loaded table ${ident.name()} in ${(endTime - startTime) / 1000.0}%.3f seconds")
+
+      table
+    } catch {
+      case e: Exception =>
+        val endTime = System.currentTimeMillis()
+        logError(
+          f"Failed to load table ${ident.name()} after ${(endTime - startTime) / 1000.0}%.3f seconds",
+          e)
+        throw e
     }
-
-    val conf = new java.util.HashMap[String, String](
-      removePrefixFromMap(options.asCaseSensitiveMap(), OPENSEARCH_PREFIX))
-    conf.put("path", ident.name())
-
-    new FlintReadOnlyTable(conf, Option.empty)
   }
 
   override def createTable(

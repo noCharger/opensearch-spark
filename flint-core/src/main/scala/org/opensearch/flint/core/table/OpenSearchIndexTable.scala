@@ -18,6 +18,8 @@ import org.opensearch.flint.core.table.OpenSearchIndexTable.maxSplitSizeBytes
 import org.opensearch.search.builder.SearchSourceBuilder
 import org.opensearch.search.sort.SortOrder
 
+import org.apache.spark.internal.Logging
+
 /**
  * Represents an OpenSearch index.
  *
@@ -26,7 +28,7 @@ import org.opensearch.search.sort.SortOrder
  * @param option
  *   FlintOptions containing configuration options for the Flint client.
  */
-class OpenSearchIndexTable(metaData: MetaData, option: FlintOptions) extends Table {
+class OpenSearchIndexTable(metaData: MetaData, option: FlintOptions) extends Table with Logging {
   @transient implicit val formats: Formats = Serialization.formats(NoTypeHints)
 
   /**
@@ -100,6 +102,7 @@ class OpenSearchIndexTable(metaData: MetaData, option: FlintOptions) extends Tab
    *   A FlintReader instance.
    */
   override def createReader(query: String): FlintReader = {
+    logInfo("OpenSearchIndexTable invoked")
     new OpenSearchSearchAfterQueryReader(
       OpenSearchClientUtils.createClient(option),
       new SearchRequest()
